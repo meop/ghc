@@ -37,10 +37,12 @@ remote_win='$env:LOCALAPPDATA\ghc-windows-aarch64-test'
 status=0
 {
   echo "host=$HOST:$PORT cabal=$CABAL_VERSION build=$BUILD_VERSION sha256=$sha256 commit=$(git -C "$here" rev-parse --short HEAD)"
+  ssh "${ssh_opts[@]}" "$HOST" "Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $remote_win\\patches" </dev/null
   scp -o BatchMode=yes -q -P "$PORT" "$here/build-cabal-on-host.ps1" "$hsc2hs_archive" "$HOST:AppData/Local/ghc-windows-aarch64-test/"
+  scp -o BatchMode=yes -q -r -P "$PORT" "$here/patches" "$HOST:AppData/Local/ghc-windows-aarch64-test/"
   # test-on-host.ps1 unpacked GHC into install\ghc-*; pick that ghc.exe.
   ssh "${ssh_opts[@]}" "$HOST" \
-    "\$ghc = (Get-ChildItem $remote_win\\install -Directory | Select-Object -First 1).FullName + '\\bin\\ghc.exe'; pwsh -NoProfile -NonInteractive -File $remote_win\\build-cabal-on-host.ps1 -Ghc \$ghc -Work $remote_win\\cabal -CabalVersion $CABAL_VERSION -CabalSha256 $sha256 -BuildVersion $BUILD_VERSION -Hsc2hsArchive $remote_win\\hsc2hs.tar.gz -Jobs $JOBS" </dev/null
+    "\$ghc = (Get-ChildItem $remote_win\\install -Directory | Select-Object -First 1).FullName + '\\bin\\ghc.exe'; pwsh -NoProfile -NonInteractive -File $remote_win\\build-cabal-on-host.ps1 -Ghc \$ghc -Work $remote_win\\cabal -CabalVersion $CABAL_VERSION -CabalSha256 $sha256 -BuildVersion $BUILD_VERSION -Hsc2hsArchive $remote_win\\hsc2hs.tar.gz -PatchesDir $remote_win\\patches -Jobs $JOBS" </dev/null
 } 2>&1 | tee "$log" || status=$?
 echo "log: $log"
 exit "$status"

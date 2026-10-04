@@ -17,6 +17,9 @@ param(
     # GHC's own copy of hsc2hs (utils/hsc2hs), which has Windows AArch64
     # support that the Hackage release (0.68.10) lacks.
     [Parameter(Mandatory)] [string] $Hsc2hsArchive,
+    # Directory of <package>-<version>.patch files (windows-aarch64/patches):
+    # each package is unpacked into the project and patched.
+    [Parameter(Mandatory)] [string] $PatchesDir,
     [int] $Jobs = 2
 )
 $ErrorActionPreference = 'Stop'
@@ -94,8 +97,17 @@ Check "cabal get cabal-install-$BuildVersion" {
     try { Invoke-Logged 'cabal-get' $x64Cabal @('get', "cabal-install-$BuildVersion") | Out-Null } finally { Pop-Location }
     tar -xzf $Hsc2hsArchive -C (Join-Path $project 'hsc2hs')
     if ($LASTEXITCODE -ne 0) { throw "tar failed: $LASTEXITCODE" }
+    $patched = @()
+    foreach ($patch in Get-ChildItem $PatchesDir -Filter '*.patch') {
+        $pkg = $patch.BaseName
+        Push-Location $project
+        try { Invoke-Logged "cabal-get-$pkg" $x64Cabal @('get', $pkg) | Out-Null } finally { Pop-Location }
+        Push-Location (Join-Path $project $pkg)
+        try { Invoke-Logged "patch-$pkg" 'git' @('apply', '-p1', $patch.FullName) | Out-Null } finally { Pop-Location }
+        $patched += "$pkg/"
+    }
     @(
-        "packages: cabal-install-$BuildVersion/ hsc2hs/"
+        "packages: cabal-install-$BuildVersion/ hsc2hs/ $($patched -join ' ')"
         "allow-newer: $AllowNewer"
         # tar 0.6 uses OsPath quasiquotes (0.6.4 also via directory-ospath-streaming);
         # quasiquotes need Template Haskell, which needs the RTS linker (milestone 3).
@@ -103,7 +115,7 @@ Check "cabal get cabal-install-$BuildVersion" {
         'package hashable'
         '  ghc-options: -package ghc-bignum'
     ) | Set-Content -Encoding utf8 (Join-Path $project 'cabal.project')
-    'ok'
+    "patched: $(if ($patched) { $patched -join ', ' } else { 'none' })"
 }
 
 function Build-Cabal([string] $log, [string] $cabal, [string] $installDir) {
