@@ -33,6 +33,8 @@ scp_opts=(-o BatchMode=yes -q -P "$PORT")
 
 # Paths relative to the remote home directory, which is where scp lands.
 remote_dir='AppData/Local/ghc-windows-aarch64-test'
+# set -e would end the script at a failing run, before the logs are kept.
+status=0
 {
   echo "host=$HOST:$PORT tarball=$TARBALL commit=$(git rev-parse --short HEAD)"
   ssh "${ssh_opts[@]}" "$HOST" "New-Item -ItemType Directory -Force \$env:LOCALAPPDATA\\ghc-windows-aarch64-test | Out-Null" </dev/null
@@ -40,7 +42,6 @@ remote_dir='AppData/Local/ghc-windows-aarch64-test'
   echo "copied"
   ssh "${ssh_opts[@]}" "$HOST" \
     "pwsh -NoProfile -NonInteractive -File \$env:LOCALAPPDATA\\ghc-windows-aarch64-test\\test-on-host.ps1 -Tarball \$env:LOCALAPPDATA\\ghc-windows-aarch64-test\\$(basename "$TARBALL") -Dest \$env:LOCALAPPDATA\\ghc-windows-aarch64-test\\install" </dev/null
-} 2>&1 | tee "$log"
-status=${PIPESTATUS[0]}
+} 2>&1 | tee "$log" || status=$?
 echo "log: $log"
 exit "$status"

@@ -25,13 +25,14 @@ mkdir -p "$LOG_DIR"
 log=$LOG_DIR/build-cabal-on-host-$HOST-$(date -u +%Y%m%dT%H%M%SZ).log
 ssh_opts=(-o BatchMode=yes -p "$PORT")
 remote_win='$env:LOCALAPPDATA\ghc-windows-aarch64-test'
+# set -e would end the script at a failing run, before the logs are kept.
+status=0
 {
   echo "host=$HOST:$PORT cabal=$CABAL_VERSION sha256=$sha256 commit=$(git -C "$here" rev-parse --short HEAD)"
   scp -o BatchMode=yes -q -P "$PORT" "$here/build-cabal-on-host.ps1" "$HOST:AppData/Local/ghc-windows-aarch64-test/"
   # test-on-host.ps1 unpacked GHC into install\ghc-*; pick that ghc.exe.
   ssh "${ssh_opts[@]}" "$HOST" \
     "\$ghc = (Get-ChildItem $remote_win\\install -Directory | Select-Object -First 1).FullName + '\\bin\\ghc.exe'; pwsh -NoProfile -NonInteractive -File $remote_win\\build-cabal-on-host.ps1 -Ghc \$ghc -Work $remote_win\\cabal -CabalVersion $CABAL_VERSION -CabalSha256 $sha256 -Jobs $JOBS" </dev/null
-} 2>&1 | tee "$log"
-status=${PIPESTATUS[0]}
+} 2>&1 | tee "$log" || status=$?
 echo "log: $log"
 exit "$status"
