@@ -52,6 +52,12 @@ function Invoke-Logged([string] $log, [string] $exe, [string[]] $argv) {
 }
 
 New-Item -ItemType Directory -Force (Join-Path $Work 'logs'), (Join-Path $Work 'x64'), (Join-Path $Work 'bin') | Out-Null
+# GHC-built tools (hsc2hs among them) write files in the console code page;
+# over SSH that is a legacy one, so a package with non-ASCII source fails
+# ("cannot encode character"). Use UTF-8, as a UTF-8 desktop setup would.
+chcp.com 65001 | Out-Null
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+
 # A private cabal directory (store, package index, config), so this leaves
 # no trace in the user's own %APPDATA%\cabal.
 $env:CABAL_DIR = Join-Path $Work 'cabal-dir'

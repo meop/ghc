@@ -24,6 +24,7 @@ for a in "$@"; do args+=" '${a//\'/\'\'}'"; done
 # .bat passing %*) that would split a multi-line command.
 script=$(cat <<PS
 \$ProgressPreference = 'SilentlyContinue'
+chcp.com 65001 | Out-Null  # see build-cabal-on-host.ps1
 \$root = Join-Path \$env:LOCALAPPDATA 'ghc-windows-aarch64-test'
 \$work = Join-Path \$root 'cabal'
 \$env:CABAL_DIR = Join-Path \$work 'cabal-dir'
