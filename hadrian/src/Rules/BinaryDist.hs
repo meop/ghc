@@ -245,9 +245,20 @@ buildBinDistDir root conf@BindistConfig{..} = do
     -- N.B. the ghc-pkg executable may be prefixed with a target triple
     -- (c.f. #20267).
 
-    -- Not going to work for cross
-    ghcPkgName <- programName (vanillaContext Stage1 ghcPkg)
-    ghcPkgProg <- exeSpawnPath (bindistFilesDir -/- "bin" -/- ghcPkgName)
+    --
+    -- When the bindist's executables are built for the target, as in a
+    -- target bindist from a cross build, its own ghc-pkg cannot run here. Use
+    -- the stage 1 ghc-pkg instead: it runs on the build host and is the same
+    -- GHC version, so it writes the same package.cache format.
+    exesForTarget <- (executable_stage >= Stage2 &&) <$> crossStage Stage1
+    ghcPkgProg <- if exesForTarget
+      then do
+        hostGhcPkg <- programPath (vanillaContext Stage1 ghcPkg)
+        need [hostGhcPkg]
+        exeSpawnPath hostGhcPkg
+      else do
+        ghcPkgName <- programName (vanillaContext Stage1 ghcPkg)
+        exeSpawnPath (bindistFilesDir -/- "bin" -/- ghcPkgName)
     cmdExe ghcPkgProg ["recache", "--package-db", bindistFilesDir -/- "lib" -/- "package.conf.d" ]
         :: Action ()
 
@@ -345,8 +356,7 @@ bindistRules = do
       buildBinDistDir root cfg
 
     phony "binary-dist-dir-cross" $ buildBinDistDir root crossBindist
-    -- MP: Not working yet
-    -- phony "binary-dist-dir-stage3" $ buildBinDistDir root targetBindist
+    phony "binary-dist-dir-stage3" $ buildBinDistDir root targetBindist
 
     let buildBinDist compressor = do
           win_host <- isWinHost
