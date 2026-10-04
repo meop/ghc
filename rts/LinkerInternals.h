@@ -217,6 +217,10 @@ typedef struct {
     uint8_t     jumpIsland[16];
 #elif defined(riscv64_HOST_ARCH)
     uint64_t    addr;
+#elif defined(aarch64_HOST_ARCH) && defined(mingw32_HOST_OS)
+    // ldr x16, addr; br x16 (see makeSymbolExtra_PEi386)
+    uint64_t    addr;
+    uint32_t    jumpIsland[2];
 #endif
 } SymbolExtra;
 
