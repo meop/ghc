@@ -71,7 +71,28 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
 5. **CI and release.** Add a `CROSS_STAGE=3` job for this target so a release
    bindist exists for ghcup, then open merge requests and link #25974.
 
+## For you (needs your account)
+
+- [ ] Get the gitlab.haskell.org account verified. New accounts cannot create
+      projects, so they cannot fork `ghc/ghc` (the API reports
+      `projects_limit: 0`). Open an issue from the "get-verified" template:
+      <https://gitlab.haskell.org/ghc/ghc/-/issues/new?description_template=get-verified>.
+      It asks for one sentence on why, for example "I want to contribute
+      native Windows AArch64 support fixes to Hadrian in ghc/ghc", and a
+      checkbox that the instance is only for GHC-related projects. The
+      alternative is asking an admin on the
+      [mailing list or IRC](https://gitlab.haskell.org/ghc/ghc/-/wikis/mailing-lists-and-irc).
+      glab on the Linux host is already logged in (SSH for git, token in the
+      keyring), so once verified the fork, the `fork` remote and the push can
+      be done from there.
+- [ ] Optional: log glab in on metal too
+      (`glab auth login --hostname gitlab.haskell.org`), if work there will
+      push directly.
+
 ## Windows ARM64 host checklist
+
+The ARM64 host is `metal` (`ssh metal -p 22222`): a Windows 11 26H2 ARM64
+VM with 4 CPUs and 8 GB of RAM, code in `~/code`.
 
 - [ ] Install the milestone 1 bindist; confirm `ghc --info` reports
       `aarch64-unknown-mingw32` and the binary is native ARM64, not emulated.
