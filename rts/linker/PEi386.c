@@ -2528,8 +2528,10 @@ ocResolve_PEi386 ( ObjectCode* oc )
                    int64_t addend = signExtend(insn & 0x3ffffff, 26) * 4;
                    int64_t v = (int64_t)S + addend - (int64_t)(intptr_t)pP;
                    if (!fitsSigned(v, 28)) {
+                       /* A branch target is code whatever type its symbol was
+                          registered with, so always use an executable island. */
                        copyName (getSymShortName (info, sym), oc, symbol, sizeof(symbol)-1);
-                       S = makeSymbolExtra_PEi386(oc, symIndex, S, (char *)symbol, sym_type);
+                       S = makeSymbolExtra_PEi386(oc, symIndex, S, (char *)symbol, SYM_TYPE_CODE);
                        v = (int64_t)S + addend - (int64_t)(intptr_t)pP;
                        if (!fitsSigned(v, 28)) {
                            errorBelch("%" PATH_FMT ": IMAGE_REL_ARM64_BRANCH26 out of range for %s, "
