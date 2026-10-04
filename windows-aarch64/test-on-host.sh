@@ -6,7 +6,7 @@
 #
 # Environment:
 #   HOST     SSH host (default: metal)
-#   PORT     SSH port (default: 22222)
+#   PORT     SSH port (default: 22222; metal forwards it to resin, the ARM64 VM)
 #   TARBALL  distribution (default: the only _build/windows-aarch64/ghc-*.tar.gz)
 #   LOG_DIR  where the log goes (default: windows-aarch64/logs)
 set -euo pipefail

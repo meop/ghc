@@ -48,7 +48,7 @@ Hadrian cannot package it as a bindist yet; see milestone 1 in
 ```sh
 TARGET=binary-dist-dir-stage3 windows-aarch64/run-capped.sh bootstrap-bindist windows-aarch64/build-bootstrap.sh
 windows-aarch64/package-bindist.sh   # -> _build/windows-aarch64/ghc-*-aarch64-unknown-mingw32.tar.gz
-windows-aarch64/test-on-host.sh      # HOST=metal PORT=22222 by default
+windows-aarch64/test-on-host.sh      # HOST=metal PORT=22222 by default: resin, through metal's port forward
 ```
 
 `test-on-host.sh` copies the package and `test-on-host.ps1` to the host, unpacks

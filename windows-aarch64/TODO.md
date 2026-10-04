@@ -50,10 +50,10 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   bundles llvm-mingw 20250114's Windows AArch64 build as `mingw/`, rewrites the
   target file to `$tooldir/mingw/bin/...` (with `-fuse-ld=lld`, since that
   build has no prefixed `ld`), and fixes the cross-prefixed `unlit` name in
-  `settings`. On metal (Windows 11 26H2 ARM64 VM), `test-on-host.sh` passed
+  `settings`. On resin (Windows 11 26H2 ARM64 VM, reached through `metal` port 22222), `test-on-host.sh` passed
   every check: ARM64 `ghc.exe` and output, hello world, `text`/`bytestring`/
   `containers` with `-O`, `-threaded` with `+RTS -N` on 4 cores, and C FFI
-  through the bundled clang and lld (log `test-on-host-metal-20261004T204319Z`).
+  through the bundled clang and lld (log `test-on-host-metal-20261004T204319Z`; logs are named after the SSH host).
 - Packaging is a script for now. For upstream, Hadrian should do it: bundle the
   host toolchain into a target bindist and write `$tooldir` paths, as
   `SUBST_TOOLDIR` (`m4/subst_tooldir.m4`) does for native Windows builds, and
@@ -92,21 +92,21 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
       glab on the Linux host is already logged in (SSH for git, token in the
       keyring), so once verified the fork, the `fork` remote and the push can
       be done from there.
-- [ ] Optional: log glab in on metal too
+- [ ] Optional: log glab in on resin too
       (`glab auth login --hostname gitlab.haskell.org`), if work there will
       push directly.
 
 ## Windows ARM64 host checklist
 
-The ARM64 host is `metal` (`ssh metal -p 22222`): a Windows 11 26H2 ARM64
-VM with 4 CPUs and 8 GB of RAM, code in `~/code`.
+The ARM64 host is resin, reached as `ssh metal -p 22222` (a port forward on
+metal): a Windows 11 26H2 ARM64 VM with 4 CPUs and 8 GB of RAM, code in `~/code`.
 
 - [x] Install the milestone 1 bindist; confirm `ghc --info` reports
       `aarch64-unknown-mingw32` and the binary is native ARM64, not emulated.
-      (metal, 2026-10-04, `test-on-host.sh`)
+      (resin, 2026-10-04, `test-on-host.sh`)
 - [x] Compile and run a hello world, a program using `Data.Text` and
       `Data.ByteString`, and a threaded program (`-threaded`, `+RTS -N`).
-      (metal, 2026-10-04, `test-on-host.sh`; also C FFI)
+      (resin, 2026-10-04, `test-on-host.sh`; also C FFI)
 - [ ] Build ShellCheck from source with `cabal build` and run its tests.
 - [ ] Run the GHC testsuite natively (`hadrian/build test`) from a source
       tree, and record failures that do not occur on x86_64 Windows.
