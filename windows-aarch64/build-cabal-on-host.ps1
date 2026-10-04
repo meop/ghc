@@ -47,9 +47,12 @@ function Get-PEMachine([string] $path) {
 # nonzero exit with the last lines of output.
 function Invoke-Logged([string] $log, [string] $exe, [string[]] $argv) {
     $path = Join-Path $Work "logs\$log.log"
-    & $exe @argv 2>&1 | ForEach-Object { "$_" } | Set-Content -Encoding utf8 $path
-    if ($LASTEXITCODE -ne 0) {
-        throw "exit $LASTEXITCODE (see $log.log):`n$((Get-Content $path | Select-Object -Last 15) -join "`n")"
+    # Collect first: piping no output to Set-Content creates no file.
+    $out = @(& $exe @argv 2>&1 | ForEach-Object { "$_" })
+    $code = $LASTEXITCODE
+    Set-Content -Encoding utf8 -Path $path -Value $out
+    if ($code -ne 0) {
+        throw "exit $code (see $log.log):`n$((Get-Content $path | Select-Object -Last 15) -join "`n")"
     }
     Get-Content $path
 }
