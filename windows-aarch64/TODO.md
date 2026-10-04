@@ -34,6 +34,16 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   `hadrian/src/Rules/BinaryDist.hs` ("Not working yet"), and `targetBindist` is
   not defined. `.gitlab/ci.sh` documents `CROSS_STAGE=3` regardless.
 
+## Progress
+
+- 2026-10-04: `_build/stage2/bin/ghc.exe` built from x86_64 Linux: a 139 MB
+  PE32+ ARM64 executable (machine `0xAA64`) importing only Windows system DLLs.
+  Two fixes were needed: pin llvm-mingw to GHC CI's 20250114 (see the hsc2hs
+  note above), and the Hadrian commit "use the stage's target executable
+  suffix for programs". It is not yet packaged with its libraries, so it
+  cannot be copied to Windows and run on its own; that is the remaining part of
+  milestone 1.
+
 ## Milestones
 
 1. **Bootstrap bindist** (see [BOOTSTRAP.md](BOOTSTRAP.md)). On x86_64 Linux, build the `aarch64-unknown-mingw32`

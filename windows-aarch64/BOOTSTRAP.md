@@ -39,6 +39,7 @@ result.
 | Date | Machine | Target | Flavour | Jobs | Time | Peak memory |
 | --- | --- | --- | --- | --- | --- | --- |
 | 2026-10-04 | Ryzen 7 5700G, 8 GB cap | Stage 1 cross compiler (`stage2:exe:ghc-bin`), from a clean tree | `quick+native_bignum` | 4 | 22 min | 4.0 GB |
+| 2026-10-04 | Ryzen 7 5700G, 8 GB cap | Stage 2 Windows AArch64 `ghc.exe` (`stage3:exe:ghc-bin`), from a clean tree | `quick+native_bignum` | 4 | 57 min | 5.0 GB |
 
 ## Build time estimates
 
