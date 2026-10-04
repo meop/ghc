@@ -460,7 +460,7 @@
 #include <stdlib.h>
 #include <psapi.h>
 
-#if defined(x86_64_HOST_ARCH)
+#if defined(x86_64_HOST_ARCH) || defined(aarch64_HOST_ARCH)
 static size_t makeSymbolExtra_PEi386(
     ObjectCode* oc,
     uint64_t index,
@@ -1351,7 +1351,6 @@ verifyCOFFHeader ( uint16_t machine, IMAGE_FILE_HEADER *hdr,
       errorBelch("%" PATH_FMT ": Not a ARM64 PE+ file.", fileName);
       return false;
    }
-   errorBelch("PE/PE+ not supported on ARM64.");
 #else
    errorBelch("PE/PE+ not supported on this arch.");
 #endif
@@ -2181,6 +2180,111 @@ void ocProtectExtras(ObjectCode* oc STG_UNUSED) { }
 
 #endif /* x86_64_HOST_ARCH */
 
+#if defined(aarch64_HOST_ARCH)
+
+/* AArch64 COFF relocation types, from the PE format specification. MinGW's
+   winnt.h does not define them. */
+#define IMAGE_REL_ARM64_ABSOLUTE        0x0000
+#define IMAGE_REL_ARM64_ADDR32          0x0001
+#define IMAGE_REL_ARM64_ADDR32NB        0x0002
+#define IMAGE_REL_ARM64_BRANCH26        0x0003
+#define IMAGE_REL_ARM64_PAGEBASE_REL21  0x0004
+#define IMAGE_REL_ARM64_REL21           0x0005
+#define IMAGE_REL_ARM64_PAGEOFFSET_12A  0x0006
+#define IMAGE_REL_ARM64_PAGEOFFSET_12L  0x0007
+#define IMAGE_REL_ARM64_SECREL          0x0008
+#define IMAGE_REL_ARM64_SECREL_LOW12A   0x0009
+#define IMAGE_REL_ARM64_SECREL_HIGH12A  0x000A
+#define IMAGE_REL_ARM64_SECREL_LOW12L   0x000B
+#define IMAGE_REL_ARM64_TOKEN           0x000C
+#define IMAGE_REL_ARM64_SECTION         0x000D
+#define IMAGE_REL_ARM64_ADDR64          0x000E
+#define IMAGE_REL_ARM64_BRANCH19        0x000F
+#define IMAGE_REL_ARM64_BRANCH14        0x0010
+#define IMAGE_REL_ARM64_REL32           0x0011
+
+/* A jump island for a branch whose target is out of range: the target address
+   followed by `ldr x16, <addr>; br x16`. x16 (IP0) is the intra-procedure-call
+   scratch register, which the calling convention lets veneers clobber.  Data
+   symbols get a plain pointer, as on x86_64. */
+static size_t
+makeSymbolExtra_PEi386( ObjectCode* oc, uint64_t index STG_UNUSED, size_t s, char* symbol STG_UNUSED, SymType type )
+{
+    SymbolExtra *extra;
+    switch(type & ~(SYM_TYPE_DUP_DISCARD | SYM_TYPE_HIDDEN)) {
+        case SYM_TYPE_CODE: {
+            extra = m32_alloc(oc->rx_m32, sizeof(SymbolExtra), 8);
+            CHECK(extra);
+            extra->addr = (uint64_t)s;
+            extra->jumpIsland[0] = 0x58ffffd0; /* ldr x16, .-8 (extra->addr) */
+            extra->jumpIsland[1] = 0xd61f0200; /* br x16 */
+            FlushInstructionCache(GetCurrentProcess(), extra, sizeof(SymbolExtra));
+            IF_DEBUG(linker_verbose, debugBelch("makeSymbolExtra(code): %s -> %p\n", symbol, &extra->jumpIsland));
+            return (size_t)&extra->jumpIsland;
+        }
+        case SYM_TYPE_INDIRECT_DATA: {
+            extra = m32_alloc(oc->rw_m32, sizeof(SymbolExtra), 8);
+            CHECK(extra);
+            void *v = *(void**) s;
+            extra->addr = (uint64_t)v;
+            IF_DEBUG(linker_verbose, debugBelch("makeSymbolExtra(data): %s -> %p\n", symbol, &extra->addr));
+            return (size_t)&extra->addr;
+        }
+        default: {
+            extra = m32_alloc(oc->rw_m32, sizeof(SymbolExtra), 8);
+            CHECK(extra);
+            extra->addr = (uint64_t)s;
+            IF_DEBUG(linker_verbose, debugBelch("makeSymbolExtra(indirect-data): %s -> %p\n", symbol, &extra->addr));
+            return (size_t)&extra->addr;
+        }
+    }
+}
+
+static inline bool fitsSigned(int64_t v, unsigned bits)
+{
+    return v >= -((int64_t)1 << (bits - 1)) && v < ((int64_t)1 << (bits - 1));
+}
+
+static inline int64_t signExtend(uint64_t v, unsigned bits)
+{
+    uint64_t m = (uint64_t)1 << (bits - 1);
+    v &= ((uint64_t)1 << bits) - 1;
+    return (int64_t)((v ^ m) - m);
+}
+
+/* The 21-bit immediate of ADR/ADRP: immlo in bits 29-30, immhi in bits 5-23. */
+static inline int64_t getAdrImm(uint32_t insn)
+{
+    return signExtend(((insn >> 29) & 0x3) | (((insn >> 5) & 0x7ffff) << 2), 21);
+}
+
+static inline uint32_t setAdrImm(uint32_t insn, int64_t imm)
+{
+    insn &= ~((0x3u << 29) | (0x7ffffu << 5));
+    return insn | (((uint32_t)imm & 0x3) << 29) | ((((uint32_t)imm >> 2) & 0x7ffff) << 5);
+}
+
+/* Add to the unsigned 12-bit immediate (bits 10-21) of ADD or LDR/STR. As in
+   LLVM's linker, the instruction's existing immediate is the addend. */
+static inline uint32_t addImm12(uint32_t insn, uint64_t imm)
+{
+    imm += (insn >> 10) & 0xfff;
+    insn &= ~(0xfffu << 10);
+    return insn | (uint32_t)((imm & 0xfff) << 10);
+}
+
+/* The access size of an LDR/STR (unsigned offset) is log2 bytes in bits 30-31,
+   plus 4 for 128-bit SIMD/FP; its immediate is scaled by that size. */
+static inline unsigned ldstScale(uint32_t insn)
+{
+    unsigned size = insn >> 30;
+    if ((insn & 0x4800000) == 0x4800000)
+        size += 4;
+    return size;
+}
+
+#endif /* aarch64_HOST_ARCH */
+
 bool
 ocResolve_PEi386 ( ObjectCode* oc )
 {
@@ -2202,6 +2306,13 @@ ocResolve_PEi386 ( ObjectCode* oc )
 
    COFF_HEADER_INFO *info = oc->info->ch_info;
    uint32_t numberOfSections = info->numberOfSections;
+
+#if defined(aarch64_HOST_ARCH)
+   /* Jump islands for code symbols out of ADRP/ADR/branch range (functions in
+      DLLs), one per symbol so that both halves of an ADRP+ADD or ADRP+LDR pair
+      use the same island. Allocated with the object's other data. */
+   size_t *islands = NULL;
+#endif
 
    for (i = 0; i < numberOfSections; i++) {
       Section section = oc->sections[i];
@@ -2264,6 +2375,24 @@ ocResolve_PEi386 ( ObjectCode* oc )
                 releaseOcInfo (oc);
                 return false;
             }
+#if defined(aarch64_HOST_ARCH)
+            /* Linker memory is within 2GB of the executable, so anything
+               further away is in a DLL. ADDR64 reaches anywhere; every other
+               reference to a far function goes through a nearby island, whose
+               address also works as the function's address. */
+            if (reloc->Type != IMAGE_REL_ARM64_ADDR64
+                && !fitsSigned((int64_t)S - (int64_t)(intptr_t)pP, 32)
+                && (sym_type & ~(SYM_TYPE_DUP_DISCARD | SYM_TYPE_HIDDEN)) == SYM_TYPE_CODE) {
+                if (islands == NULL) {
+                    islands = m32_alloc(oc->rw_m32, sizeof(size_t) * info->numberOfSymbols, 8);
+                    CHECK(islands);
+                    memset(islands, 0, sizeof(size_t) * info->numberOfSymbols);
+                }
+                if (islands[symIndex] == 0)
+                    islands[symIndex] = makeSymbolExtra_PEi386(oc, symIndex, S, (char *)symbol, sym_type);
+                S = islands[symIndex];
+            }
+#endif
          }
          IF_DEBUG(linker_verbose, debugBelch("S=%zx\n", S));
 
@@ -2347,17 +2476,146 @@ ocResolve_PEi386 ( ObjectCode* oc )
                    break;
                }
 #elif defined(aarch64_HOST_ARCH)
-            case 1: // IMAGE_REL_ARM64_ADDR32, see https://llvm.org/doxygen/namespacellvm_1_1COFF.html, https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#arm64-processors
+            /* Addends are in the instruction or data being relocated, as in
+               LLVM's COFF linker (lld/COFF/Chunks.cpp, applyRelARM64). Linker
+               memory is allocated within 2GB of the executable image (see
+               mmapAnonForLinker), so ADRP's +-4GB always reaches RTS symbols;
+               only BRANCH26's +-128MB needs a jump island. */
+            case IMAGE_REL_ARM64_ABSOLUTE:
+               break;
+            case IMAGE_REL_ARM64_ADDR64:
                {
-                    // We have to put this stub due of errors like:
-                    // warning: variable 'A' set but not used.
-                    uint64_t v;
-                    v = S + A;
-
-                    debugBelch("%" PATH_FMT ": Catch ARM64 PEi386 relocation type %d, %llx\n",
-                        oc->fileName, reloc->Type, v);
-                    releaseOcInfo (oc);
-                    return false;
+                   checkProddableBlock(&oc->proddables, pP, 8);
+                   *(uint64_t *)pP = S + *(uint64_t *)pP;
+                   break;
+               }
+            case IMAGE_REL_ARM64_ADDR32:
+            case IMAGE_REL_ARM64_ADDR32NB:
+               {
+                   int64_t v = (int64_t)(S + A);
+                   if (reloc->Type == IMAGE_REL_ARM64_ADDR32NB)
+                       v -= (int64_t) GetModuleHandleW(NULL);
+                   if (reloc->Type == IMAGE_REL_ARM64_ADDR32 ? (uint64_t)v > UINT32_MAX : !fitsSigned(v, 32)) {
+                       copyName (getSymShortName (info, sym), oc, symbol, sizeof(symbol)-1);
+                       errorBelch("%" PATH_FMT ": IMAGE_REL_ARM64_ADDR32%s out of range (0x%" PRIx64 ") for %s",
+                                  oc->fileName, reloc->Type == IMAGE_REL_ARM64_ADDR32NB ? "NB" : "",
+                                  (uint64_t)v, (char *)symbol);
+                       releaseOcInfo (oc);
+                       return false;
+                   }
+                   *(uint32_t *)pP = (uint32_t)v;
+                   break;
+               }
+            case IMAGE_REL_ARM64_REL32:
+               {
+                   int64_t v = (int64_t)(S + (int32_t)A) - (int64_t)(intptr_t)pP - 4;
+                   if (!fitsSigned(v, 32)) {
+                       copyName (getSymShortName (info, sym), oc, symbol, sizeof(symbol)-1);
+                       errorBelch("%" PATH_FMT ": IMAGE_REL_ARM64_REL32 out of range for %s",
+                                  oc->fileName, (char *)symbol);
+                       releaseOcInfo (oc);
+                       return false;
+                   }
+                   *(uint32_t *)pP = (uint32_t)v;
+                   break;
+               }
+            case IMAGE_REL_ARM64_SECREL:
+               {
+                   uint64_t offset = S - (uint64_t) section.start;
+                   CHECK((uint32_t) offset == offset);
+                   *(uint32_t *)pP = offset + A;
+                   break;
+               }
+            case IMAGE_REL_ARM64_BRANCH26:
+               {
+                   uint32_t insn = (uint32_t)A;
+                   int64_t addend = signExtend(insn & 0x3ffffff, 26) * 4;
+                   int64_t v = (int64_t)S + addend - (int64_t)(intptr_t)pP;
+                   if (!fitsSigned(v, 28)) {
+                       copyName (getSymShortName (info, sym), oc, symbol, sizeof(symbol)-1);
+                       S = makeSymbolExtra_PEi386(oc, symIndex, S, (char *)symbol, sym_type);
+                       v = (int64_t)S + addend - (int64_t)(intptr_t)pP;
+                       if (!fitsSigned(v, 28)) {
+                           errorBelch("%" PATH_FMT ": IMAGE_REL_ARM64_BRANCH26 out of range for %s, "
+                                      "even through a jump island",
+                                      oc->fileName, (char *)symbol);
+                           releaseOcInfo (oc);
+                           return false;
+                       }
+                   }
+                   *(uint32_t *)pP = (insn & ~0x3ffffffu) | (((uint64_t)v >> 2) & 0x3ffffff);
+                   break;
+               }
+            case IMAGE_REL_ARM64_BRANCH19:
+            case IMAGE_REL_ARM64_BRANCH14:
+               {
+                   /* B.cond/CBZ/CBNZ (imm19) and TBZ/TBNZ (imm14), both at bit 5. */
+                   uint32_t insn = (uint32_t)A;
+                   unsigned bits = reloc->Type == IMAGE_REL_ARM64_BRANCH19 ? 19 : 14;
+                   uint32_t mask = ((1u << bits) - 1) << 5;
+                   int64_t v = (int64_t)S + signExtend((insn & mask) >> 5, bits) * 4
+                             - (int64_t)(intptr_t)pP;
+                   if (!fitsSigned(v, bits + 2)) {
+                       copyName (getSymShortName (info, sym), oc, symbol, sizeof(symbol)-1);
+                       errorBelch("%" PATH_FMT ": IMAGE_REL_ARM64_BRANCH%u out of range for %s",
+                                  oc->fileName, bits, (char *)symbol);
+                       releaseOcInfo (oc);
+                       return false;
+                   }
+                   *(uint32_t *)pP = (insn & ~mask) | ((((uint64_t)v >> 2) << 5) & mask);
+                   break;
+               }
+            case IMAGE_REL_ARM64_PAGEBASE_REL21:
+            case IMAGE_REL_ARM64_REL21:
+               {
+                   /* ADRP (page delta) and ADR (byte delta). */
+                   uint32_t insn = (uint32_t)A;
+                   unsigned shift = reloc->Type == IMAGE_REL_ARM64_PAGEBASE_REL21 ? 12 : 0;
+                   uint64_t target = S + getAdrImm(insn);
+                   int64_t v = (int64_t)(target >> shift) - (int64_t)((uintptr_t)pP >> shift);
+                   if (!fitsSigned(v, 21)) {
+                       copyName (getSymShortName (info, sym), oc, symbol, sizeof(symbol)-1);
+                       errorBelch("%" PATH_FMT ": IMAGE_REL_ARM64_%s out of range for %s",
+                                  oc->fileName, shift ? "PAGEBASE_REL21" : "REL21", (char *)symbol);
+                       releaseOcInfo (oc);
+                       return false;
+                   }
+                   *(uint32_t *)pP = setAdrImm(insn, v);
+                   break;
+               }
+            case IMAGE_REL_ARM64_PAGEOFFSET_12A:
+               {
+                   *(uint32_t *)pP = addImm12((uint32_t)A, S & 0xfff);
+                   break;
+               }
+            case IMAGE_REL_ARM64_PAGEOFFSET_12L:
+               {
+                   uint32_t insn = (uint32_t)A;
+                   unsigned scale = ldstScale(insn);
+                   uint64_t off = S & 0xfff;
+                   if (off & ((1u << scale) - 1)) {
+                       copyName (getSymShortName (info, sym), oc, symbol, sizeof(symbol)-1);
+                       errorBelch("%" PATH_FMT ": IMAGE_REL_ARM64_PAGEOFFSET_12L misaligned for %s",
+                                  oc->fileName, (char *)symbol);
+                       releaseOcInfo (oc);
+                       return false;
+                   }
+                   *(uint32_t *)pP = addImm12(insn, off >> scale);
+                   break;
+               }
+            case IMAGE_REL_ARM64_SECREL_LOW12A:
+            case IMAGE_REL_ARM64_SECREL_HIGH12A:
+            case IMAGE_REL_ARM64_SECREL_LOW12L:
+            case IMAGE_REL_ARM64_TOKEN:
+            case IMAGE_REL_ARM64_SECTION:
+               {
+                   /* Thread-local storage and debug/CLR records; not produced by
+                      GHC's code generators for loadable code. */
+                   copyName (getSymShortName (info, sym), oc, symbol, sizeof(symbol)-1);
+                   errorBelch("%" PATH_FMT ": unsupported ARM64 PEi386 relocation type %d for %s",
+                              oc->fileName, reloc->Type, (char *)symbol);
+                   releaseOcInfo (oc);
+                   return false;
                }
 #endif
             default:
@@ -2393,6 +2651,16 @@ ocResolve_PEi386 ( ObjectCode* oc )
           oc->info->xdata = &oc->sections[i];
       }
    }
+
+#if defined(aarch64_HOST_ARCH)
+   /* AArch64 does not keep the instruction cache coherent with data writes,
+      so make the patched code visible before it can run. */
+   for (i = 0; i < numberOfSections; i++) {
+      Section section = oc->sections[i];
+      if (section.kind == SECTIONKIND_CODE_OR_RODATA && section.start && section.size)
+         FlushInstructionCache(GetCurrentProcess(), section.start, section.size);
+   }
+#endif
 
    // We now have no more need of info->ch_info and info->symbols.
    stgFree(oc->info->ch_info);
