@@ -14,6 +14,9 @@ param(
     # A GHC development snapshot ships boot libraries newer than released
     # packages' bounds allow; relax only those.
     [string] $AllowNewer = 'base,ghc-prim,ghc-bignum,template-haskell,containers,time,deepseq,bytestring,text,directory,filepath,process,Win32,array,os-string,file-io,stm,mtl,transformers,parsec,exceptions,binary,semaphore-compat',
+    # GHC's own copy of hsc2hs (utils/hsc2hs), which has Windows AArch64
+    # support that the Hackage release (0.68.10) lacks.
+    [Parameter(Mandatory)] [string] $Hsc2hsArchive,
     [int] $Jobs = 2
 )
 $ErrorActionPreference = 'Stop'
@@ -73,27 +76,44 @@ Check 'cabal update' { Invoke-Logged 'cabal-update' $x64Cabal @('update') | Sele
 $gitSh = Join-Path $env:ProgramFiles 'Git\usr\bin'
 if (Test-Path (Join-Path $gitSh 'sh.exe')) { $env:PATH = "$env:PATH;$gitSh" }
 
-$nativeCabal = Join-Path $Work 'bin\cabal.exe'
-Check 'build cabal-install with x64 cabal and AArch64 GHC' {
-    Invoke-Logged 'build-cabal-1' $x64Cabal @(
-        'install', "cabal-install-$BuildVersion", "--with-compiler=$Ghc", "--allow-newer=$AllowNewer", "-j$Jobs",
-        '--install-method=copy', '--overwrite-policy=always', "--installdir=$(Join-Path $Work 'bin')"
-    ) | Out-Null
-    $m = Get-PEMachine $nativeCabal
+# A project rather than `cabal install cabal-install-X`, so that two
+# workarounds can apply: hsc2hs from GHC's tree, and hashable seeing
+# ghc-bignum, which GHC master no longer exposes the way hashable expects.
+$project = Join-Path $Work 'project'
+Check "cabal get cabal-install-$BuildVersion" {
+    if (Test-Path $project) { Remove-Item -Recurse -Force $project }
+    New-Item -ItemType Directory -Force (Join-Path $project 'hsc2hs') | Out-Null
+    Push-Location $project
+    try { Invoke-Logged 'cabal-get' $x64Cabal @('get', "cabal-install-$BuildVersion") | Out-Null } finally { Pop-Location }
+    tar -xzf $Hsc2hsArchive -C (Join-Path $project 'hsc2hs')
+    if ($LASTEXITCODE -ne 0) { throw "tar failed: $LASTEXITCODE" }
+    @(
+        "packages: cabal-install-$BuildVersion/ hsc2hs/"
+        "allow-newer: $AllowNewer"
+        'package hashable'
+        '  ghc-options: -package ghc-bignum'
+    ) | Set-Content -Encoding utf8 (Join-Path $project 'cabal.project')
+    'ok'
+}
+
+function Build-Cabal([string] $log, [string] $cabal, [string] $installDir) {
+    Push-Location $project
+    try {
+        Invoke-Logged $log $cabal @(
+            'install', 'exe:cabal', "--with-compiler=$Ghc", "-j$Jobs",
+            '--install-method=copy', '--overwrite-policy=always', "--installdir=$installDir"
+        ) | Out-Null
+    } finally { Pop-Location }
+    $m = Get-PEMachine (Join-Path $installDir 'cabal.exe')
     if ($m -ne '0xAA64') { throw "cabal.exe is $m" }
     "cabal.exe $m"
 }
-Check 'native cabal --version' { (Invoke-Logged 'native-version' $nativeCabal @('--version')) -join ' ' }
 
+$nativeCabal = Join-Path $Work 'bin\cabal.exe'
+Check 'build cabal-install with x64 cabal and AArch64 GHC' { Build-Cabal 'build-cabal-1' $x64Cabal (Join-Path $Work 'bin') }
+Check 'native cabal --version' { (Invoke-Logged 'native-version' $nativeCabal @('--version')) -join ' ' }
 # Self-host: the native cabal builds cabal-install again into a second dir.
-Check 'native cabal rebuilds cabal-install' {
-    $again = Join-Path $Work 'bin-selfhost'
-    Invoke-Logged 'build-cabal-2' $nativeCabal @(
-        'install', "cabal-install-$BuildVersion", "--with-compiler=$Ghc", "--allow-newer=$AllowNewer", "-j$Jobs",
-        '--install-method=copy', '--overwrite-policy=always', "--installdir=$again"
-    ) | Out-Null
-    "$(Get-PEMachine (Join-Path $again 'cabal.exe'))"
-}
+Check 'native cabal rebuilds cabal-install' { Build-Cabal 'build-cabal-2' $nativeCabal (Join-Path $Work 'bin-selfhost') }
 
 if ($failed) { "$failed check(s) failed"; exit 1 }
 "native cabal: $nativeCabal"
