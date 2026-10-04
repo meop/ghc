@@ -3,10 +3,15 @@
 # aarch64-linux-deb12-wine-int_native-cross_aarch64-unknown-mingw32-validate,
 # with llvm-mingw installed at $LLVM_MINGW instead of /opt/llvm-mingw-linux.
 #
-#   . ./windows-aarch64-env.sh
-#   ./boot.source && ./configure --target=aarch64-unknown-mingw32 \
-#       --with-intree-gmp --enable-strict-ghc-toolchain-check
-#   hadrian/build --flavour=quick --bignum=native --docs=none -j8 binary-dist-stage3
+# The toolchain variables must reach ./configure only: Hadrian builds itself
+# as a normal Linux program, and an exported CC would point it at the cross
+# compiler. Source this in a subshell around configure:
+#
+#   ./boot
+#   ( . ./windows-aarch64-env.sh && ./configure --target=aarch64-unknown-mingw32 \
+#       --with-intree-gmp --enable-strict-ghc-toolchain-check )
+#   PATH="$HOME/.ghcup/bin:$PATH" hadrian/build --flavour=quick --bignum=native \
+#       --docs=none -j4 binary-dist-stage3
 
 : "${LLVM_MINGW:=$HOME/.local/opt/llvm-mingw}"
 p="$LLVM_MINGW/bin/aarch64-w64-mingw32-"
