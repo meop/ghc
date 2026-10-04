@@ -15,6 +15,8 @@ meant to be merged: changes for review go to merge requests against `ghc/ghc`.
 | [build-bootstrap.sh](build-bootstrap.sh) | Builds the stage 1 cross compiler, then the stage 2 compiler that runs on Windows AArch64 |
 | [run-capped.sh](run-capped.sh) | Runs a step in a systemd user scope with a memory cap, logging timing and peak memory |
 | [repro-hsc2hs-codeview.sh](repro-hsc2hs-codeview.sh) | Shows that newer clang emits the CodeView record that breaks hsc2hs's cross mode |
+| [package-bindist.sh](package-bindist.sh) | Bundles llvm-mingw's Windows AArch64 build as `mingw/`, points the target file at it through `$tooldir`, and packs a `.tar.gz` |
+| [test-on-host.sh](test-on-host.sh), [test-on-host.ps1](test-on-host.ps1) | Copies the package to a Windows AArch64 host over SSH and checks that GHC runs and builds working programs there |
 | [env.sh](env.sh) | The cross toolchain variables, mirroring GHC's Windows AArch64 CI job; applied to `./configure` only |
 
 ## Building the bootstrap bindist
@@ -41,8 +43,20 @@ Hadrian cannot package it as a bindist yet; see milestone 1 in
 | `MEMORY_MAX` | `8G` | Hard memory cap; only the build's own processes can be killed |
 | `LOG_DIR` | `windows-aarch64/logs` | Where logs are written; outside `_build` so `CLEAN=1` cannot delete them |
 
-## Validating on Windows AArch64
+## Packaging and testing on Windows AArch64
 
-Copy the bindist to a Windows AArch64 machine and work through the checklist in
-[TODO.md](TODO.md#windows-arm64-host-checklist), recording each result there
-with the commit it ran against.
+```sh
+TARGET=binary-dist-dir-stage3 windows-aarch64/run-capped.sh bootstrap-bindist windows-aarch64/build-bootstrap.sh
+windows-aarch64/package-bindist.sh   # -> _build/windows-aarch64/ghc-*-aarch64-unknown-mingw32.tar.gz
+windows-aarch64/test-on-host.sh      # HOST=metal PORT=22222 by default
+```
+
+`test-on-host.sh` copies the package and `test-on-host.ps1` to the host, unpacks
+it under `%LOCALAPPDATA%\ghc-windows-aarch64-test`, and checks: `ghc.exe` and
+the programs it builds are ARM64; `ghc --info` reports the target; `ghc-pkg
+check`; hello world; `text`, `bytestring` and `containers` with `-O`; a
+`-threaded` program with `+RTS -N`; and a C FFI call. The log goes to
+`windows-aarch64/logs/`. The install stays on the host for manual use.
+
+The rest of the checklist is in [TODO.md](TODO.md#windows-arm64-host-checklist);
+record each result there with the commit it ran against.
