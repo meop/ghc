@@ -12,7 +12,7 @@ meant to be merged: changes for review go to merge requests against `ghc/ghc`.
 | [TODO.md](TODO.md) | Where things stand, the milestones, and the checklist for a Windows AArch64 host |
 | [BOOTSTRAP.md](BOOTSTRAP.md) | How the stages produce a Windows AArch64 GHC without one to start from, where to build it, and build times |
 | [install-toolchain.sh](install-toolchain.sh) | Installs a bootstrap GHC with cabal, alex, and happy (ghcup, `~/.ghcup`) and llvm-mingw (`~/.local/opt/llvm-mingw`), per-user |
-| [build-bootstrap.sh](build-bootstrap.sh) | Builds the stage 1 cross compiler, then the stage 2 Windows AArch64 bindist |
+| [build-bootstrap.sh](build-bootstrap.sh) | Builds the stage 1 cross compiler, then the stage 2 compiler that runs on Windows AArch64 |
 | [run-capped.sh](run-capped.sh) | Runs a step in a systemd user scope with a memory cap, logging timing and peak memory |
 | [env.sh](env.sh) | The cross toolchain variables, mirroring GHC's Windows AArch64 CI job; applied to `./configure` only |
 
@@ -25,13 +25,16 @@ windows-aarch64/install-toolchain.sh
 windows-aarch64/run-capped.sh bootstrap windows-aarch64/build-bootstrap.sh
 ```
 
-The bindist lands in `_build/bindist/`, and the log, with timing stamps and peak
-memory, in `_build/logs/bootstrap-<timestamp>.log`.
+The stage 2 compiler lands in `_build/stage2/bin/ghc.exe`, and the log, with
+timing stamps and peak memory, in `_build/logs/bootstrap-<timestamp>.log`.
+Hadrian cannot package it as a bindist yet; see milestone 1 in
+[TODO.md](TODO.md#milestones).
 
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `JOBS` | `4` | Hadrian parallelism |
-| `FLAVOUR` | `quick` | Hadrian flavour |
+| `FLAVOUR` | `quick` | Hadrian flavour; `+native_bignum` is appended |
+| `TARGET` | `stage2:exe:ghc-bin` | Hadrian target |
 | `CLEAN` | unset | `1` removes `_build` first |
 | `MEMORY_HIGH` | `7G` | Memory level at which the kernel throttles the build |
 | `MEMORY_MAX` | `8G` | Hard memory cap; only the build's own processes can be killed |

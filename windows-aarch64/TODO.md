@@ -21,14 +21,19 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   dynamic code loading therefore do not work natively (#26760).
 - Split sections are broken for this target (#26763).
 - `platformCConvNeedsExtension` needs Windows ARM64 handling (#27684).
-- Hadrian can build a target-executable bindist (`binary-dist-stage3`,
-  `CROSS_STAGE=3` in `.gitlab/ci.sh`), but no CI job does it for this target.
+- Hadrian builds stage 2 compilers for cross targets (23c9b6c392, 2023-12), but
+  cannot package one as a target-executable bindist: `binary-dist-stage3` needs
+  `binary-dist-dir-stage3`, which is commented out in
+  `hadrian/src/Rules/BinaryDist.hs` ("Not working yet"), and `targetBindist` is
+  not defined. `.gitlab/ci.sh` documents `CROSS_STAGE=3` regardless.
 
 ## Milestones
 
 1. **Bootstrap bindist** (see [BOOTSTRAP.md](BOOTSTRAP.md)). On x86_64 Linux, build the `aarch64-unknown-mingw32`
-   cross compiler with llvm-mingw, then `binary-dist-stage3` for a GHC that
-   runs on Windows ARM64. Record the exact configure and Hadrian arguments.
+   cross compiler with llvm-mingw, then the stage 2 compiler
+   (`stage2:exe:ghc-bin`), which runs on Windows ARM64. Then implement
+   `binary-dist-dir-stage3` in Hadrian (a `targetBindist`: the stage 2
+   compiler with target libraries) so it ships as a bindist.
 2. **Validate natively** (Windows ARM64 host): see below.
 3. **RTS linker.** Implement ARM64 COFF relocations in `rts/linker/PEi386.c`
    (ADDR32/64, ADDR32NB, BRANCH26, PAGEBASE_REL21, PAGEOFFSET_12A/12L,
