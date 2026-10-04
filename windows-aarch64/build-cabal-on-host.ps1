@@ -9,6 +9,11 @@ param(
     [Parameter(Mandatory)] [string] $Work,
     [Parameter(Mandatory)] [string] $CabalVersion,
     [Parameter(Mandatory)] [string] $CabalSha256,
+    # The cabal-install to build, from Hackage, which can lag the binary releases.
+    [Parameter(Mandatory)] [string] $BuildVersion,
+    # A GHC development snapshot ships boot libraries newer than released
+    # packages' bounds allow; relax only those.
+    [string] $AllowNewer = 'base,ghc-prim,ghc-bignum,template-haskell,containers,time,deepseq,bytestring,text,directory,filepath,process,Win32,array,os-string,file-io,stm,mtl,transformers,parsec,exceptions,binary,semaphore-compat',
     [int] $Jobs = 2
 )
 $ErrorActionPreference = 'Stop'
@@ -71,7 +76,7 @@ if (Test-Path (Join-Path $gitSh 'sh.exe')) { $env:PATH = "$env:PATH;$gitSh" }
 $nativeCabal = Join-Path $Work 'bin\cabal.exe'
 Check 'build cabal-install with x64 cabal and AArch64 GHC' {
     Invoke-Logged 'build-cabal-1' $x64Cabal @(
-        'install', "cabal-install-$CabalVersion", "--with-compiler=$Ghc", "-j$Jobs",
+        'install', "cabal-install-$BuildVersion", "--with-compiler=$Ghc", "--allow-newer=$AllowNewer", "-j$Jobs",
         '--install-method=copy', '--overwrite-policy=always', "--installdir=$(Join-Path $Work 'bin')"
     ) | Out-Null
     $m = Get-PEMachine $nativeCabal
@@ -84,7 +89,7 @@ Check 'native cabal --version' { (Invoke-Logged 'native-version' $nativeCabal @(
 Check 'native cabal rebuilds cabal-install' {
     $again = Join-Path $Work 'bin-selfhost'
     Invoke-Logged 'build-cabal-2' $nativeCabal @(
-        'install', "cabal-install-$CabalVersion", "--with-compiler=$Ghc", "-j$Jobs",
+        'install', "cabal-install-$BuildVersion", "--with-compiler=$Ghc", "--allow-newer=$AllowNewer", "-j$Jobs",
         '--install-method=copy', '--overwrite-policy=always', "--installdir=$again"
     ) | Out-Null
     "$(Get-PEMachine (Join-Path $again 'cabal.exe'))"
