@@ -34,6 +34,12 @@ result.
 | GitHub Actions on a fork of the `ghc/ghc` GitHub mirror | `ubuntu-24.04` or `ubuntu-24.04-arm` runner: 4 cores, 16 GB, free for public repositories, 6-hour job limit | Yes: a follow-on `windows-11-arm` job runs the bindist checks automatically | A `quick` stage 2 build should fit in 6 hours; if not, split it across jobs with caching. Merge requests still go to GitLab. |
 | GitLab CI on gitlab.haskell.org | GHC's own runners | Under Wine only | Fork pipelines normally get no runners; a pipeline runs only for a merge request against `ghc/ghc`. |
 
+## Measured build times
+
+| Date | Machine | Target | Flavour | Jobs | Time | Peak memory |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-04 | Ryzen 7 5700G, 8 GB cap | Stage 1 cross compiler (`stage2:exe:ghc-bin`), from a clean tree | `quick+native_bignum` | 4 | 22 min | 4.0 GB |
+
 ## Build time estimates
 
 For the cross compiler plus a `quick` stage 2 on an AMD Ryzen 7 5700G

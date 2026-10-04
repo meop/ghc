@@ -31,7 +31,7 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
 
 1. **Bootstrap bindist** (see [BOOTSTRAP.md](BOOTSTRAP.md)). On x86_64 Linux, build the `aarch64-unknown-mingw32`
    cross compiler with llvm-mingw, then the stage 2 compiler
-   (`stage2:exe:ghc-bin`), which runs on Windows ARM64. Then implement
+   (Hadrian target `stage3:exe:ghc-bin`), which runs on Windows ARM64. Then implement
    `binary-dist-dir-stage3` in Hadrian (a `targetBindist`: the stage 2
    compiler with target libraries) so it ships as a bindist.
 2. **Validate natively** (Windows ARM64 host): see below.

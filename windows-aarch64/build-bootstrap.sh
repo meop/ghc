@@ -6,12 +6,15 @@
 # Hadrian's target-executable bindist (binary-dist-stage3) is not implemented
 # yet: its binary-dist-dir-stage3 rule is commented out in
 # hadrian/src/Rules/BinaryDist.hs. Until it is, the default target builds the
-# stage 2 compiler itself, _build/stage2/bin/ghc.exe.
+# stage 2 compiler itself, _build/stage2/bin/ghc.exe. Hadrian's target names are
+# shifted by one: stage2:exe:ghc-bin is the stage 1 cross compiler
+# (_build/stage1/bin/aarch64-unknown-mingw32-ghc), and stage3:exe:ghc-bin is the
+# compiler that runs on Windows AArch64.
 #
 # Usage: windows-aarch64/build-bootstrap.sh
 #   JOBS     Hadrian parallelism (default 4)
 #   FLAVOUR  Hadrian flavour, before +native_bignum (default quick)
-#   TARGET   Hadrian target (default stage2:exe:ghc-bin)
+#   TARGET   Hadrian target (default stage3:exe:ghc-bin)
 #   CLEAN=1  remove _build first
 # Run it under windows-aarch64/run-capped.sh to cap its memory.
 
@@ -20,7 +23,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${JOBS:=4}"
 : "${FLAVOUR:=quick}"
-: "${TARGET:=stage2:exe:ghc-bin}"
+: "${TARGET:=stage3:exe:ghc-bin}"
 export PATH="$HOME/.ghcup/bin:$PATH"
 
 start=$(date +%s)
