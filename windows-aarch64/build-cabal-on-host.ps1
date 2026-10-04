@@ -91,9 +91,9 @@ Check "cabal get cabal-install-$BuildVersion" {
     @(
         "packages: cabal-install-$BuildVersion/ hsc2hs/"
         "allow-newer: $AllowNewer"
-        # tar >= 0.6.4 needs directory-ospath-streaming, whose quasiquotes need
-        # Template Haskell, which needs the RTS linker (milestone 3).
-        'constraints: tar < 0.6.4'
+        # tar 0.6 uses OsPath quasiquotes (0.6.4 also via directory-ospath-streaming);
+        # quasiquotes need Template Haskell, which needs the RTS linker (milestone 3).
+        'constraints: tar < 0.6'
         'package hashable'
         '  ghc-options: -package ghc-bignum'
     ) | Set-Content -Encoding utf8 (Join-Path $project 'cabal.project')
