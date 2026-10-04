@@ -67,6 +67,13 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   | hashable 1.5.1.0 | imports `GHC.Num.*` without depending on `ghc-bignum` | no (GHC master) | `-package ghc-bignum` | Ecosystem catches up with GHC 10.x |
   | windns 0.1.0.1 | hsc2hs: "cannot encode character" | no (legacy code page over SSH) | `chcp 65001` | — |
 
+- 2026-10-04: **milestone 3 core works natively.** With "rts/linker: load
+  AArch64 COFF objects on Windows" and "hadrian: build the cross-built target
+  ghc with its interpreter", `test-on-host.sh` passes 15 checks on resin,
+  including `ghc -e`, a Template Haskell splice with `runIO`, and a
+  quasiquoter from another module. Not yet done: exception unwind tables
+  (`.pdata`) are not registered on AArch64, so C++ exceptions through loaded
+  code are untested; GHCi itself (`--interactive`) has not been exercised.
 - Packaging is a script for now. For upstream, Hadrian should do it: bundle the
   host toolchain into a target bindist and write `$tooldir` paths, as
   `SUBST_TOOLDIR` (`m4/subst_tooldir.m4`) does for native Windows builds, and

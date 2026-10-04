@@ -101,6 +101,42 @@ main = do
 main :: IO ()
 main = print (c_cbrt 27)'
     Check 'C FFI (cbrt)' { Invoke-Native $ghc @('-v0', 'ffi.hs', '-o', 'ffi.exe'); Invoke-Native '.\ffi.exe' @() }
+    # Milestone 3: the interpreter and Template Haskell load object code with
+    # the RTS linker.
+    Check 'ghc -e (interpreter)' {
+        $out = Invoke-Native $ghc @('-e', 'print (sum [1 .. 10 :: Int])')
+        if ($out -ne '55') { throw "got: $out" }
+        $out
+    }
+
+    Set-Content th.hs '{-# LANGUAGE TemplateHaskell #-}
+import Language.Haskell.TH
+main :: IO ()
+main = print ($(litE (integerL (product [1 .. 20]))) :: Integer, $(stringE . show =<< runIO (pure (6 * 7 :: Int))))'
+    Check 'Template Haskell splice' {
+        Invoke-Native $ghc @('-v0', 'th.hs', '-o', 'th.exe') | Out-Null
+        Invoke-Native '.\th.exe' @()
+    }
+
+    # A quasiquoter defined in one module and used in another, as OsPath's
+    # [osp|...|] is.
+    Set-Content QQ.hs 'module QQ (shout) where
+import Data.Char (toUpper)
+import Language.Haskell.TH
+import Language.Haskell.TH.Quote
+shout :: QuasiQuoter
+shout = QuasiQuoter { quoteExp = stringE . map toUpper, quotePat = undefined, quoteType = undefined, quoteDec = undefined }'
+    # Not qq.hs: Windows file names are case-insensitive, so it would replace QQ.hs.
+    Set-Content useqq.hs '{-# LANGUAGE QuasiQuotes #-}
+import QQ
+main :: IO ()
+main = putStrLn [shout|quasiquoted|]'
+    Check 'quasiquoter' {
+        Invoke-Native $ghc @('-v0', 'useqq.hs', '-o', 'qq.exe') | Out-Null
+        $out = Invoke-Native '.\qq.exe' @()
+        if ($out -ne 'QUASIQUOTED') { throw "got: $out" }
+        $out
+    }
 } finally {
     Pop-Location
 }
