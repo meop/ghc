@@ -27,7 +27,7 @@ windows-aarch64/run-capped.sh bootstrap windows-aarch64/build-bootstrap.sh
 ```
 
 The stage 2 compiler lands in `_build/stage2/bin/ghc.exe`, and the log, with
-timing stamps and peak memory, in `_build/logs/bootstrap-<timestamp>.log`.
+timing stamps and peak memory, in `windows-aarch64/logs/bootstrap-<timestamp>.log` (ignored by git).
 Hadrian cannot package it as a bindist yet; see milestone 1 in
 [TODO.md](TODO.md#milestones).
 
@@ -39,7 +39,7 @@ Hadrian cannot package it as a bindist yet; see milestone 1 in
 | `CLEAN` | unset | `1` removes `_build` first |
 | `MEMORY_HIGH` | `7G` | Memory level at which the kernel throttles the build |
 | `MEMORY_MAX` | `8G` | Hard memory cap; only the build's own processes can be killed |
-| `LOG_DIR` | `_build/logs` | Where logs are written |
+| `LOG_DIR` | `windows-aarch64/logs` | Where logs are written; outside `_build` so `CLEAN=1` cannot delete them |
 
 ## Validating on Windows AArch64
 

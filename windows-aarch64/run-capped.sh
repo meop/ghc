@@ -7,7 +7,8 @@
 # Usage: windows-aarch64/run-capped.sh <name> <command> [args...]
 #   MEMORY_HIGH  throttle point (default 7G)
 #   MEMORY_MAX   hard cap (default 8G)
-#   LOG_DIR      where <name>-<timestamp>.log is written (default _build/logs)
+#   LOG_DIR      where <name>-<timestamp>.log is written (default windows-aarch64/logs,
+#                outside _build so CLEAN=1 cannot delete a running log)
 #
 # Example:
 #   windows-aarch64/run-capped.sh bootstrap windows-aarch64/build-bootstrap.sh
@@ -24,7 +25,7 @@ shift
 cd "$(dirname "$0")/.."
 : "${MEMORY_HIGH:=7G}"
 : "${MEMORY_MAX:=8G}"
-: "${LOG_DIR:=_build/logs}"
+: "${LOG_DIR:=windows-aarch64/logs}"
 mkdir -p "$LOG_DIR"
 log="$LOG_DIR/$name-$(date -u +%Y%m%dT%H%M%SZ).log"
 unit="ghc-$name-$(date +%s)"
