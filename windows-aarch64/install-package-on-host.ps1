@@ -80,7 +80,7 @@ Check "build $Package" {
     Push-Location $project
     try {
         Invoke-Logged 'build' $cabal @(
-            'install', "exe:*", "--with-compiler=$ghc", "-j$Jobs",
+            'install', ($Package -replace '-[0-9.]+$', ''), "--with-compiler=$ghc", "-j$Jobs",
             '--install-method=copy', '--overwrite-policy=always', "--installdir=$bin"
         ) | Out-Null
     } finally { Pop-Location }
