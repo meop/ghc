@@ -55,7 +55,8 @@ getProgramContexts stage = do
   forM allPackages $ \pkg -> do
     ctx <- programContext stage pkg -- TODO: see todo on programContext.
     name <- programName ctx
-    return (name <.> exe, ctx)
+    ext <- programExe stage
+    return (name <.> ext, ctx)
 
 lookupProgramContext :: FilePath -> [(FilePath, Context)] -> Maybe Context
 lookupProgramContext wholePath progs = lookup (takeFileName wholePath) progs

@@ -15,7 +15,7 @@ module Packages (
     ghcPackages, isGhcPackage,
 
     -- * Package information
-    crossPrefix, programBasename, programName, nonHsMainPackage, programPath, timeoutPath,
+    crossPrefix, programBasename, programName, nonHsMainPackage, programPath, programExe, timeoutPath,
     ) where
 
 import Hadrian.Package
@@ -196,7 +196,19 @@ programPath :: Context -> Action FilePath
 programPath context@Context {..} = do
     name <- programName context
     path <- stageBinPath stage
-    return $ path -/- name <.> exe
+    ext  <- programExe stage
+    return $ path -/- name <.> ext
+
+-- | The executable extension for programs built in a 'Stage': @exe@ when the
+-- stage targets Windows. A stage 2 program of a cross build runs on the
+-- target, not the host, so Shake's host-based 'exe' is wrong for it: building
+-- @stage3:exe:ghc-bin@ for @aarch64-unknown-mingw32@ on Linux links
+-- @_build/stage2/bin/ghc.exe@, which the rule would otherwise look for as
+-- @_build/stage2/bin/ghc@.
+programExe :: Stage -> Action String
+programExe stage = do
+    win <- isWinTarget stage
+    return $ if win then "exe" else ""
 
 -- TODO: Move @timeout@ to the @util@ directory and build in a more standard
 -- location like other programs used only by the testsuite.
