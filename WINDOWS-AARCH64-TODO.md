@@ -26,7 +26,7 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
 
 ## Milestones
 
-1. **Bootstrap bindist.** On x86_64 Linux, build the `aarch64-unknown-mingw32`
+1. **Bootstrap bindist** (see [WINDOWS-AARCH64-BOOTSTRAP.md](WINDOWS-AARCH64-BOOTSTRAP.md)). On x86_64 Linux, build the `aarch64-unknown-mingw32`
    cross compiler with llvm-mingw, then `binary-dist-stage3` for a GHC that
    runs on Windows ARM64. Record the exact configure and Hadrian arguments.
 2. **Validate natively** (Windows ARM64 host): see below.
