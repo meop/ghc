@@ -76,9 +76,10 @@ Check 'cabal update' { Invoke-Logged 'cabal-update' $x64Cabal @('update') | Sele
 $gitSh = Join-Path $env:ProgramFiles 'Git\usr\bin'
 if (Test-Path (Join-Path $gitSh 'sh.exe')) { $env:PATH = "$env:PATH;$gitSh" }
 
-# A project rather than `cabal install cabal-install-X`, so that two
-# workarounds can apply: hsc2hs from GHC's tree, and hashable seeing
-# ghc-bignum, which GHC master no longer exposes the way hashable expects.
+# A project rather than `cabal install cabal-install-X`, so that workarounds
+# can apply: hsc2hs from GHC's tree, hashable seeing ghc-bignum (which GHC
+# master no longer exposes the way hashable expects), and avoiding Template
+# Haskell until the RTS linker supports AArch64 PE.
 $project = Join-Path $Work 'project'
 Check "cabal get cabal-install-$BuildVersion" {
     if (Test-Path $project) { Remove-Item -Recurse -Force $project }
@@ -90,6 +91,9 @@ Check "cabal get cabal-install-$BuildVersion" {
     @(
         "packages: cabal-install-$BuildVersion/ hsc2hs/"
         "allow-newer: $AllowNewer"
+        # tar >= 0.6.4 needs directory-ospath-streaming, whose quasiquotes need
+        # Template Haskell, which needs the RTS linker (milestone 3).
+        'constraints: tar < 0.6.4'
         'package hashable'
         '  ghc-options: -package ghc-bignum'
     ) | Set-Content -Encoding utf8 (Join-Path $project 'cabal.project')
