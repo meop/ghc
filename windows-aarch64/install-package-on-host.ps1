@@ -20,7 +20,6 @@ $gitSh = Join-Path $env:ProgramFiles 'Git\usr\bin'
 if (Test-Path $gitSh) { $env:PATH = "$env:PATH;$gitSh" }
 $ghc = (Get-ChildItem (Join-Path $root 'install') -Directory | Select-Object -First 1).FullName + '\bin\ghc.exe'
 $cabal = Join-Path $work 'bin\cabal.exe'
-$base = Join-Path $work 'project'
 $project = Join-Path $work "pkg-$Package"
 $bin = Join-Path $project 'bin'
 $logs = Join-Path $project 'logs'
@@ -61,12 +60,18 @@ New-Item -ItemType Directory -Force $project, $bin, $logs | Out-Null
 Check "cabal get $Package" {
     Push-Location $project
     try { Invoke-Logged 'cabal-get' $cabal @('get', $Package) | Out-Null } finally { Pop-Location }
-    # Patched packages and GHC's hsc2hs from the cabal-install project.
+    # GHC's hsc2hs from the cabal-install project, and every stored patch
+    # (windows-aarch64/patches, copied here by install-package-on-host.sh)
+    # applied to a fresh copy of its package.
     $local = @("$Package/", '../project/hsc2hs/')
-    # (build-cabal-on-host.sh copied windows-aarch64/patches to the host.)
-    $local += Get-ChildItem (Join-Path $root 'patches') -Filter '*.patch' |
-        Where-Object { Test-Path (Join-Path $base $_.BaseName) } |
-        ForEach-Object { "../project/$($_.BaseName)/" }
+    foreach ($patch in Get-ChildItem (Join-Path $root 'patches') -Filter '*.patch') {
+        $pkg = $patch.BaseName
+        Push-Location $project
+        try { Invoke-Logged "cabal-get-$pkg" $cabal @('get', $pkg) | Out-Null } finally { Pop-Location }
+        Push-Location (Join-Path $project $pkg)
+        try { Invoke-Logged "patch-$pkg" 'git' @('apply', '-p1', $patch.FullName) | Out-Null } finally { Pop-Location }
+        $local += "$pkg/"
+    }
     @(
         "packages: $($local -join ' ')"
         "allow-newer: $AllowNewer"
