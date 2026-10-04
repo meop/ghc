@@ -2,8 +2,22 @@
 
 How a native Windows AArch64 GHC is produced when no GHC yet runs there, and
 where to build it. The plan and validation checklist are in
-[WINDOWS-AARCH64-TODO.md](WINDOWS-AARCH64-TODO.md); the build environment is
-[windows-aarch64-env.sh](windows-aarch64-env.sh).
+[TODO.md](TODO.md).
+
+## Scripts
+
+Run from the repository root on x86_64 Linux:
+
+1. `windows-aarch64/install-toolchain.sh` installs a bootstrap GHC with cabal,
+   alex, and happy (ghcup, `~/.ghcup`) and llvm-mingw
+   (`~/.local/opt/llvm-mingw`), all per-user.
+2. `windows-aarch64/run-capped.sh bootstrap windows-aarch64/build-bootstrap.sh`
+   builds the stage 2 bindist into `_build/bindist/`, inside a systemd scope
+   capped at 8 GB, with timing stamps and peak memory in `_build/logs/`.
+
+`env.sh` holds the cross toolchain variables, which `build-bootstrap.sh` applies
+to `./configure` only. `JOBS`, `FLAVOUR`, `CLEAN`, `MEMORY_HIGH`, and
+`MEMORY_MAX` adjust a run.
 
 ## Stages
 
