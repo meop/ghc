@@ -17,6 +17,7 @@ meant to be merged: changes for review go to merge requests against `ghc/ghc`.
 | [repro-hsc2hs-codeview.sh](repro-hsc2hs-codeview.sh) | Shows that newer clang emits the CodeView record that breaks hsc2hs's cross mode |
 | [package-bindist.sh](package-bindist.sh) | Bundles llvm-mingw's Windows AArch64 build as `mingw/`, points the target file at it through `$tooldir`, and packs a `.tar.gz` |
 | [test-on-host.sh](test-on-host.sh), [test-on-host.ps1](test-on-host.ps1) | Copies the package to a Windows AArch64 host over SSH and checks that GHC runs and builds working programs there |
+| [build-cabal-on-host.sh](build-cabal-on-host.sh), [build-cabal-on-host.ps1](build-cabal-on-host.ps1) | On the host, builds a native AArch64 `cabal.exe` with the installed GHC (the official x64 cabal drives the first build under emulation), then has it rebuild itself |
 | [env.sh](env.sh) | The cross toolchain variables, mirroring GHC's Windows AArch64 CI job; applied to `./configure` only |
 
 ## Building the bootstrap bindist
