@@ -72,6 +72,10 @@ Check "cabal get $Package" {
         "allow-newer: $AllowNewer"
         'package hashable'
         '  ghc-options: -package ghc-bignum'
+        # GHC master implicitly imports GHC.Essentials (from base) into every
+        # module; this shim package does not depend on base.
+        'package data-default-class'
+        '  ghc-options: -package base'
     ) | Set-Content -Encoding utf8 (Join-Path $project 'cabal.project')
     "local packages: $($local -join ', ')"
 }
