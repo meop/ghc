@@ -82,6 +82,19 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   "executing data": an out-of-range branch to a symbol registered as data got
   a data island; branch islands are now always executable (fixup commit, to
   squash into the linker commit before a merge request).
+- 2026-10-04: **hadolint 2.15.1 built natively** (5.8 minutes after its
+  dependencies); `hadolint.exe` is ARM64 and reports the expected findings
+  on a sample Dockerfile. Two more blockers: `data-default-class` 0.2.0.0
+  does not depend on `base`, which GHC master's implicit `GHC.Essentials`
+  import requires (`-package base` for it; not AArch64 specific); and
+  hadolint pins `Cabal >= 3.12.1 && < 3.13`, whose `Environment.hs` has the
+  same "Unknown mingw32 arch" check as network
+  (`patches/Cabal-3.12.1.0.patch`; fixed upstream from Cabal 3.16).
+- So all three registry gaps that wait on GHC (cabal, ShellCheck, hadolint)
+  now build natively on Windows AArch64 with this branch, given the package
+  workarounds above. For releases they still need a GHC release with this
+  support (or a cross-compiling CI job), plus fixes released in hsc2hs,
+  network, and a Cabal 3.12 backport or a hadolint bump to Cabal >= 3.16.
 - Packaging is a script for now. For upstream, Hadrian should do it: bundle the
   host toolchain into a target bindist and write `$tooldir` paths, as
   `SUBST_TOOLDIR` (`m4/subst_tooldir.m4`) does for native Windows builds, and
