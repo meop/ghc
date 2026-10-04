@@ -5,7 +5,8 @@
 #   windows-aarch64/cabal-on-host.sh build directory-ospath-streaming -v2
 # Uses the native cabal once one exists, else the emulated x64 one.
 #
-# Environment: HOST (default: metal), PORT (default: 22222), LOG_DIR.
+# Environment: HOST (default: metal), PORT (default: 22222), LOG_DIR,
+#   PROJECT (default: project; e.g. pkg-ShellCheck-0.11.0 from install-package-on-host.sh).
 set -euo pipefail
 
 (( $# )) || { echo "usage: cabal-on-host.sh <cabal arguments>" >&2; exit 1; }
@@ -13,6 +14,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 HOST=${HOST:-metal}
 PORT=${PORT:-22222}
 LOG_DIR=${LOG_DIR:-$here/logs}
+PROJECT=${PROJECT:-project}
 mkdir -p "$LOG_DIR"
 log=$LOG_DIR/cabal-on-host-$HOST-$(date -u +%Y%m%dT%H%M%SZ).log
 
@@ -33,7 +35,7 @@ if (Test-Path \$gitSh) { \$env:PATH = "\$env:PATH;\$gitSh" }
 \$ghc = (Get-ChildItem (Join-Path \$root 'install') -Directory | Select-Object -First 1).FullName + '\\bin\\ghc.exe'
 \$cabal = Join-Path \$work 'bin\\cabal.exe'
 if (-not (Test-Path \$cabal)) { \$cabal = Join-Path \$work 'x64\\cabal.exe' }
-Set-Location (Join-Path \$work 'project')
+Set-Location (Join-Path \$work '$PROJECT')
 & \$cabal $args --with-compiler=\$ghc 2>&1 | ForEach-Object { "\$_" }
 exit \$LASTEXITCODE
 PS
