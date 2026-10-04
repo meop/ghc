@@ -54,6 +54,19 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   every check: ARM64 `ghc.exe` and output, hello world, `text`/`bytestring`/
   `containers` with `-O`, `-threaded` with `+RTS -N` on 4 cores, and C FFI
   through the bundled clang and lld (log `test-on-host-metal-20261004T204319Z`; logs are named after the SSH host).
+- 2026-10-04: **native `cabal.exe` (cabal-install 3.18.1.0, ARM64) built on
+  resin** with this GHC in 19 minutes (`build-cabal-on-host.sh`). The x64
+  cabal release drove the build under emulation. Blockers on the way:
+
+  | Package | Problem | Windows AArch64 specific | Handling here | Upstream |
+  | --- | --- | --- | --- | --- |
+  | hsc2hs 0.68.10 (Hackage) | `#error Unknown mingw32 arch` | yes | GHC's `utils/hsc2hs` as a local package | Fixed in hsc2hs's repo ("Add Support for Windows Aarch64", 2025-01) but not released |
+  | network 3.2.9.0 | `HsNetDef.h`: `#error Unknown mingw32 arch` | yes | `patches/network-3.2.9.0.patch` (one line) | Not fixed; no issue or PR yet |
+  | tar >= 0.6, directory-ospath-streaming | OsPath quasiquotes run Template Haskell, which needs the RTS linker | yes (milestone 3) | `tar < 0.6` | Milestone 3 |
+  | (GHC) | When TH needs the linker, GHC prints "PE/PE+ not supported on ARM64" and then crashes with an access violation (exit 11) instead of an error (`repro-dos-crash.ps1`) | yes | — | GHC bug to report with milestone 3 |
+  | hashable 1.5.1.0 | imports `GHC.Num.*` without depending on `ghc-bignum` | no (GHC master) | `-package ghc-bignum` | Ecosystem catches up with GHC 10.x |
+  | windns 0.1.0.1 | hsc2hs: "cannot encode character" | no (legacy code page over SSH) | `chcp 65001` | — |
+
 - Packaging is a script for now. For upstream, Hadrian should do it: bundle the
   host toolchain into a target bindist and write `$tooldir` paths, as
   `SUBST_TOOLDIR` (`m4/subst_tooldir.m4`) does for native Windows builds, and
