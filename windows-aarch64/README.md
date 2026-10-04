@@ -35,7 +35,7 @@ Hadrian cannot package it as a bindist yet; see milestone 1 in
 | --- | --- | --- |
 | `JOBS` | `4` | Hadrian parallelism |
 | `FLAVOUR` | `quick` | Hadrian flavour; `+native_bignum` is appended |
-| `TARGET` | `stage3:exe:ghc-bin` | Hadrian target. Names are shifted by one stage: `stage2:exe:ghc-bin` is the stage 1 cross compiler |
+| `TARGET` | `stage3:exe:ghc-bin` | Hadrian target. Names are shifted by one stage: `stage2:exe:ghc-bin` is the stage 1 cross compiler. `binary-dist-dir-stage3` lays out the Windows AArch64 distribution in `_build/bindist/` |
 | `CLEAN` | unset | `1` removes `_build` first |
 | `MEMORY_HIGH` | `7G` | Memory level at which the kernel throttles the build |
 | `MEMORY_MAX` | `8G` | Hard memory cap; only the build's own processes can be killed |

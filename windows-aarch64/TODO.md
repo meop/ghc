@@ -40,9 +40,17 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   PE32+ ARM64 executable (machine `0xAA64`) importing only Windows system DLLs.
   Two fixes were needed: pin llvm-mingw to GHC CI's 20250114 (see the hsc2hs
   note above), and the Hadrian commit "use the stage's target executable
-  suffix for programs". It is not yet packaged with its libraries, so it
-  cannot be copied to Windows and run on its own; that is the remaining part of
-  milestone 1.
+  suffix for programs".
+- 2026-10-04: `binary-dist-dir-stage3` builds
+  `_build/bindist/ghc-10.1.20261004-aarch64-unknown-mingw32/` (829 MB): 20
+  ARM64 executables in `bin/` and a recached package database (49 packages).
+  Needed the Hadrian commit "enable binary-dist-dir-stage3 and recache it with
+  a host ghc-pkg".
+- Remaining for milestone 1: `lib/targets/default.target` points at this
+  Linux machine's llvm-mingw. A Windows bindist must bundle a Windows-hosted
+  toolchain in `mingw/` (for ARM64: llvm-mingw's `aarch64` ZIP, which GHC CI
+  also uses) and refer to it as `$tooldir/mingw/...`, as `SUBST_TOOLDIR`
+  (`m4/subst_tooldir.m4`) does for native Windows builds.
 
 ## Milestones
 
