@@ -11,9 +11,10 @@ meant to be merged: changes for review go to merge requests against `ghc/ghc`.
 | --- | --- |
 | [TODO.md](TODO.md) | Where things stand, the milestones, and the checklist for a Windows AArch64 host |
 | [BOOTSTRAP.md](BOOTSTRAP.md) | How the stages produce a Windows AArch64 GHC without one to start from, where to build it, and build times |
-| [install-toolchain.sh](install-toolchain.sh) | Installs a bootstrap GHC with cabal, alex, and happy (ghcup, `~/.ghcup`) and llvm-mingw (`~/.local/opt/llvm-mingw`), per-user |
+| [install-toolchain.sh](install-toolchain.sh) | Installs a bootstrap GHC with cabal, alex, and happy (ghcup, `~/.ghcup`) and llvm-mingw pinned to GHC CI's version (`~/.local/opt/llvm-mingw`), per-user |
 | [build-bootstrap.sh](build-bootstrap.sh) | Builds the stage 1 cross compiler, then the stage 2 compiler that runs on Windows AArch64 |
 | [run-capped.sh](run-capped.sh) | Runs a step in a systemd user scope with a memory cap, logging timing and peak memory |
+| [repro-hsc2hs-codeview.sh](repro-hsc2hs-codeview.sh) | Shows that newer clang emits the CodeView record that breaks hsc2hs's cross mode |
 | [env.sh](env.sh) | The cross toolchain variables, mirroring GHC's Windows AArch64 CI job; applied to `./configure` only |
 
 ## Building the bootstrap bindist

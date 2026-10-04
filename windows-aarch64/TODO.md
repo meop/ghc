@@ -21,6 +21,13 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   dynamic code loading therefore do not work natively (#26760).
 - Split sections are broken for this target (#26763).
 - `platformCConvNeedsExtension` needs Windows ARM64 handling (#27684).
+- hsc2hs `--cross-compile` breaks with newer llvm-mingw. clang 23 (llvm-mingw
+  20260922) always emits a CodeView `.debug$S` record in COFF assembly, even
+  with `-g0`, and hsc2hs's `ATTParser` reads its words as part of the last
+  `___hsc2hs_*` value ("Cannot combine instructions: [Quad 408,Long 4,Long
+  241,Ref \".Ltmp1-.Ltmp0\"]"). clang 19 (llvm-mingw 20250114, GHC CI's pin)
+  does not emit it. `repro-hsc2hs-codeview.sh` shows the difference. Fix in
+  hsc2hs: stop collecting a value at a section change.
 - Hadrian builds stage 2 compilers for cross targets (23c9b6c392, 2023-12), but
   cannot package one as a target-executable bindist: `binary-dist-stage3` needs
   `binary-dist-dir-stage3`, which is commented out in

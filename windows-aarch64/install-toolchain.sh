@@ -10,8 +10,9 @@
 set -euo pipefail
 
 : "${GHC_VERSION:=9.10}"                # configure.ac: MinBootGhcVersion
-: "${LLVM_MINGW_VERSION:=20260922}"     # github.com/mstorsjo/llvm-mingw releases
+: "${LLVM_MINGW_VERSION:=20250114}"     # GHC CI's pin (ghc/ci-images images/debian.dhall)
 : "${LLVM_MINGW_FLAVOUR:=ucrt}"         # GHC's Windows toolchain targets UCRT
+: "${LLVM_MINGW_OS:=ubuntu-20.04-x86_64}"  # later releases name this ubuntu-22.04-x86_64
 : "${LLVM_MINGW_PREFIX:=$HOME/.local/opt}"
 
 ghcup_bin="$HOME/.ghcup/bin"
@@ -27,7 +28,7 @@ ghcup install cabal recommended --set
 cabal update
 cabal install alex happy --overwrite-policy=always --installdir "$ghcup_bin"
 
-name="llvm-mingw-$LLVM_MINGW_VERSION-$LLVM_MINGW_FLAVOUR-ubuntu-22.04-x86_64"
+name="llvm-mingw-$LLVM_MINGW_VERSION-$LLVM_MINGW_FLAVOUR-$LLVM_MINGW_OS"
 mkdir -p "$LLVM_MINGW_PREFIX"
 if [[ ! -d "$LLVM_MINGW_PREFIX/$name" ]]; then
     curl -fsSL "https://github.com/mstorsjo/llvm-mingw/releases/download/$LLVM_MINGW_VERSION/$name.tar.xz" \
