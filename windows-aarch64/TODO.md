@@ -74,6 +74,14 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   quasiquoter from another module. Not yet done: exception unwind tables
   (`.pdata`) are not registered on AArch64, so C++ exceptions through loaded
   code are untested; GHCi itself (`--interactive`) has not been exercised.
+- 2026-10-04: **ShellCheck 0.11.0 built natively** on resin with the native
+  cabal and GHC (`install-package-on-host.sh ShellCheck-0.11.0`, 4.3 minutes
+  after its dependencies): all 28 modules, including the 13 that run
+  QuickCheck's Template Haskell splices. `shellcheck.exe` is ARM64 and reports
+  the expected findings on a sample script. The first attempt crashed with
+  "executing data": an out-of-range branch to a symbol registered as data got
+  a data island; branch islands are now always executable (fixup commit, to
+  squash into the linker commit before a merge request).
 - Packaging is a script for now. For upstream, Hadrian should do it: bundle the
   host toolchain into a target bindist and write `$tooldir` paths, as
   `SUBST_TOOLDIR` (`m4/subst_tooldir.m4`) does for native Windows builds, and
