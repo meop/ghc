@@ -22,11 +22,10 @@ root=$(cd "$here/.." && pwd)
 
 cd "$root"
 if [[ -z ${BINDIST:-} ]]; then
-  shopt -s nullglob
-  found=(_build/bindist/ghc-*-aarch64-unknown-mingw32)
-  shopt -u nullglob
-  (( ${#found[@]} == 1 )) || { echo "expected one bindist directory, found ${#found[@]}; set BINDIST" >&2; exit 1; }
-  BINDIST=${found[0]}
+  # The newest: an older build's directory stays when the version changes.
+  BINDIST=$(ls -td _build/bindist/ghc-*-aarch64-unknown-mingw32 2>/dev/null | head -1)
+  [[ -n $BINDIST ]] || { echo "no bindist directory under _build/bindist; set BINDIST" >&2; exit 1; }
+  echo "bindist: $BINDIST"
 fi
 OUT_DIR=${OUT_DIR:-_build/windows-aarch64}
 CACHE=${CACHE:-$HOME/.cache/ghc-windows-aarch64}
@@ -47,6 +46,13 @@ rm -rf "$stage"
 mkdir -p "$stage"
 cp -a "$BINDIST" "$stage/$name"
 dist=$stage/$name
+
+# _build keeps the library tree of an earlier version (the version has a date
+# in it); the package database only refers to this version's, so drop others.
+version=${name#ghc-}; version=${version%-aarch64-unknown-mingw32}
+for d in "$dist"/lib/aarch64-windows-ghc-*-inplace; do
+  [[ $d == */aarch64-windows-ghc-$version-inplace ]] || { echo "dropping stale $(basename "$d")"; rm -rf "$d"; }
+done
 
 unzip -q "$CACHE/$zip_name" -d "$stage"
 mv "$stage/${zip_name%.zip}" "$dist/mingw"
