@@ -6,6 +6,7 @@
 #       speed: 2 fast (default), 1 normal, 0 slow; tests: run only these
 #   windows-aarch64/testsuite-on-host.sh status     # state and recent output
 #   windows-aarch64/testsuite-on-host.sh fetch      # copy logs to LOG_DIR
+#   windows-aarch64/testsuite-on-host.sh stop       # end a run and its processes
 #
 # Tests the GHC that test-on-host.sh installed, from this checkout's HEAD.
 # Environment: HOST (default: metal), PORT (default: 22222), MSYS2 (default:
@@ -58,5 +59,16 @@ case ${1:-} in
     scp -o BatchMode=yes -q -r -P "$PORT" "$HOST:$remote_rel/logs" "$out/"
     echo "$out"
     ;;
-  *) echo "usage: testsuite-on-host.sh start [speed] [threads] [tests...] | status | fetch" >&2; exit 1 ;;
+  stop)
+    # Stopping the task leaves its children (the Python driver, timeout.exe,
+    # sh, ghc), which run from relative paths; match them by what they run.
+    ssh_ "Stop-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue; Start-Sleep 2
+          \$t = \"$remote_win\"
+          Get-CimInstance Win32_Process | Where-Object {
+            (\$_.Name -eq 'python.exe' -and \$_.CommandLine -like '*runtests.py*') -or (\$_.ExecutablePath -like \"\$t\\*\") -or
+            (\$_.ExecutablePath -like '$MSYS2\\*') -or (\$_.Name -eq 'ghc.exe' -and \$_.CommandLine -like \"*\$t*\") } |
+            ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue; \"stopped \$(\$_.ProcessId) \$(\$_.Name)\" }
+          \"task: \$((Get-ScheduledTask -TaskName $task).State)\""
+    ;;
+  *) echo "usage: testsuite-on-host.sh start [speed] [threads] [tests...] | status | fetch | stop" >&2; exit 1 ;;
 esac
