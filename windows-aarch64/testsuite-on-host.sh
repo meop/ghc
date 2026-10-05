@@ -39,7 +39,8 @@ case ${1:-} in
     [[ -n $only ]] && args+=" -Only '$only'"
     # S4U with the highest run level: no desktop session needed, and it keeps
     # running after this SSH session ends.
-    ssh_ "\$a = New-ScheduledTaskAction -Execute 'pwsh.exe' -Argument \"$args\"
+    # Full path: a task's PATH need not include where pwsh lives (ghpm's bin).
+    ssh_ "\$a = New-ScheduledTaskAction -Execute (Join-Path \$PSHOME 'pwsh.exe') -Argument \"$args\"
           \$p = New-ScheduledTaskPrincipal -UserId (whoami) -LogonType S4U -RunLevel Highest
           \$s = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Days 2) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
           Register-ScheduledTask -TaskName $task -Action \$a -Principal \$p -Settings \$s -Force | Out-Null
