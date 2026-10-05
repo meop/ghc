@@ -36,7 +36,8 @@ case ${1:-} in
     scp -o BatchMode=yes -q -P "$PORT" "$archive" "$HOST:$remote_rel/src.tar.gz"
     scp -o BatchMode=yes -q -P "$PORT" "$here/testsuite-on-host.ps1" "$HOST:$remote_rel/"
     args="-NoProfile -ExecutionPolicy Bypass -File $remote_win\\testsuite-on-host.ps1 -Archive $remote_win\\src.tar.gz -Work $remote_win -Msys2 $MSYS2 -Speed $speed -Threads $threads"
-    [[ -n $only ]] && args+=" -Only '$only'"
+    # pwsh -File takes double quotes only; backtick-escaped inside the remote string.
+    [[ -n $only ]] && args+=" -Only \`\"$only\`\""
     # S4U with the highest run level: no desktop session needed, and it keeps
     # running after this SSH session ends.
     # Full path: a task's PATH need not include where pwsh lives (ghpm's bin).
