@@ -19,7 +19,12 @@ LOG_DIR=${LOG_DIR:-$here/logs}
 task=ghc-testsuite
 remote_rel='AppData/Local/ghc-windows-aarch64-test/testsuite'
 remote_win='$env:LOCALAPPDATA\ghc-windows-aarch64-test\testsuite'
-ssh_() { ssh -o BatchMode=yes -p "$PORT" "$HOST" "$@" </dev/null; }
+# Remote PowerShell is sent as -EncodedCommand: the host's SSH shell may be a
+# wrapper (such as a .bat passing %*) that would split a multi-line command.
+ssh_() {
+  local enc; enc=$(printf '%s' "$1" | iconv -f UTF-8 -t UTF-16LE | base64 -w0)
+  ssh -o BatchMode=yes -p "$PORT" "$HOST" "pwsh -NoProfile -NonInteractive -EncodedCommand $enc" </dev/null
+}
 
 case ${1:-} in
   start)
