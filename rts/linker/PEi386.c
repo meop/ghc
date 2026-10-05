@@ -2633,7 +2633,10 @@ ocResolve_PEi386 ( ObjectCode* oc )
          See Note [Exception Unwinding].  */
       if (section.kind == SECTIONKIND_EXCEPTION_TABLE) {
           oc->info->pdata = &oc->sections[i];
-#if defined(x86_64_HOST_ARCH)
+#if defined(x86_64_HOST_ARCH) || defined(aarch64_HOST_ARCH)
+          /* RUNTIME_FUNCTION is the target's entry: 12 bytes on x86_64 and
+             8 on AArch64 (function start and unwind data, both image-base
+             relative, as ADDR32NB relocated them). */
           unsigned numEntries = section.size / sizeof(RUNTIME_FUNCTION);
           if (numEntries == 0)
             continue;
@@ -2648,7 +2651,7 @@ ocResolve_PEi386 ( ObjectCode* oc )
             releaseOcInfo (oc);
             return false;
           }
-#endif /* x86_64_HOST_ARCH.  */
+#endif /* x86_64_HOST_ARCH || aarch64_HOST_ARCH */
       } else if (section.kind == SECTIONKIND_EXCEPTION_UNWIND) {
           oc->info->xdata = &oc->sections[i];
       }
