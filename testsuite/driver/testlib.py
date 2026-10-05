@@ -1898,7 +1898,9 @@ async def do_test(name: TestName,
         dst_makefile = in_testdir('Makefile')
         if src_makefile.exists():
             makefile = src_makefile.read_text(encoding='UTF-8')
-            makefile = re.sub('TOP=.*', 'TOP=%s' % config.top, makefile, count=1)
+            # A function, not a template: a Windows config.top has backslashes,
+            # which re.sub would read as escapes ("bad escape \U").
+            makefile = re.sub('TOP=.*', lambda _: 'TOP=%s' % config.top, makefile, count=1)
             dst_makefile.write_text(makefile, encoding='UTF-8')
 
     if opts.pre_cmd:
