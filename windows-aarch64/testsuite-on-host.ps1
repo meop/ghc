@@ -22,7 +22,7 @@ try {
     $root = Join-Path $env:LOCALAPPDATA 'ghc-windows-aarch64-test'
     $ghc = (Get-ChildItem (Join-Path $root 'install') -Directory | Select-Object -First 1).FullName + '\bin\ghc.exe'
     $src = Join-Path $Work 'src'
-    if (Test-Path $src) { Remove-Item -Recurse -Force $src }
+    if (Test-Path $src) { cmd /c rd /s /q $src }   # Remove-Item hangs on this tree
     New-Item -ItemType Directory -Force $src | Out-Null
     tar -xzf $Archive -C $src
     if ($LASTEXITCODE -ne 0) { throw "tar failed: $LASTEXITCODE" }

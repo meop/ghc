@@ -19,6 +19,7 @@ LOG_DIR=${LOG_DIR:-$here/logs}
 task=ghc-testsuite
 remote_rel='AppData/Local/ghc-windows-aarch64-test/testsuite'
 remote_win='$env:LOCALAPPDATA\ghc-windows-aarch64-test\testsuite'
+# Directories are removed with rd: Remove-Item hung on the unpacked GHC tree.
 # Remote PowerShell is sent as -EncodedCommand: the host's SSH shell may be a
 # wrapper (such as a .bat passing %*) that would split a multi-line command.
 ssh_() {
@@ -32,7 +33,7 @@ case ${1:-} in
     archive=$(mktemp --suffix=.tar.gz); trap 'rm -f "$archive"' EXIT
     git -C "$here/.." archive --format=tar.gz -o "$archive" HEAD
     ssh_ "if ((Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue).State -eq 'Running') { throw 'a testsuite run is in progress' }
-          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $remote_win; New-Item -ItemType Directory -Force $remote_win | Out-Null"
+          if (Test-Path $remote_win) { cmd /c rd /s /q $remote_win }; New-Item -ItemType Directory -Force $remote_win | Out-Null"
     scp -o BatchMode=yes -q -P "$PORT" "$archive" "$HOST:$remote_rel/src.tar.gz"
     scp -o BatchMode=yes -q -P "$PORT" "$here/testsuite-on-host.ps1" "$HOST:$remote_rel/"
     args="-NoProfile -ExecutionPolicy Bypass -File $remote_win\\testsuite-on-host.ps1 -Archive $remote_win\\src.tar.gz -Work $remote_win -Msys2 $MSYS2 -Speed $speed -Threads $threads"
