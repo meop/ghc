@@ -31,7 +31,8 @@ try {
     # MSYS2 paths for make: C:\x\y -> /c/x/y
     function MsysPath([string] $p) { '/' + $p.Substring(0, 1).ToLower() + ($p.Substring(2) -replace '\\', '/') }
     $python = (Get-Command python).Source
-    $env:MSYSTEM = 'MSYS'; $env:CHERE_INVOKING = '1'
+    # inherit: keep the Windows PATH in MSYS2's login shell (the driver runs git).
+    $env:MSYSTEM = 'MSYS'; $env:CHERE_INVOKING = '1'; $env:MSYS2_PATH_TYPE = 'inherit'
     $env:PATH = "$(Join-Path $Msys2 'usr\bin');$env:PATH"
     $only = if ($Only) { "TEST='$Only'" } else { '' }
     $cmd = "make -C testsuite/tests test TEST_HC='$(MsysPath $ghc)' PYTHON='$(MsysPath $python)' " +
