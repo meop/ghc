@@ -95,6 +95,12 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   workarounds above. For releases they still need a GHC release with this
   support (or a cross-compiling CI job), plus fixes released in hsc2hs,
   network, and a Cabal 3.12 backport or a hadolint bump to Cabal >= 3.16.
+- 2026-10-05: **package test suites pass in CI.** `test-packages.yml` in
+  meop/ghc-windows-aarch64 (run 37287645105, `windows-11-arm`, release
+  `ghc-10.1.20261004-55ec2d5e8d`): native cabal-install 3.18.1.0 (30 min),
+  ShellCheck 0.11.0 with its test suite (2210 QuickCheck properties, PASS),
+  hadolint 2.15.1 with its tests (742 examples, 0 failures). Patched
+  packages are added only when the solver picks their exact version.
 - Packaging is a script for now. For upstream, Hadrian should do it: bundle the
   host toolchain into a target bindist and write `$tooldir` paths, as
   `SUBST_TOOLDIR` (`m4/subst_tooldir.m4`) does for native Windows builds, and
