@@ -2346,7 +2346,11 @@ ocResolve_PEi386 ( ObjectCode* oc )
                             printName (getSymShortName (info, sym), oc);
                   debugBelch("'\n" ));
 
-         if (getSymStorageClass (info, sym) == IMAGE_SYM_CLASS_STATIC) {
+         /* Section-relative symbols. LLVM's AArch64 COFF writer also adds
+            IMAGE_SYM_CLASS_LABEL symbols ("$L.text_1", ...) every 1MB of a
+            large section, so that relocation addends stay in range. */
+         uint8_t storageClass = getSymStorageClass (info, sym);
+         if (storageClass == IMAGE_SYM_CLASS_STATIC || storageClass == IMAGE_SYM_CLASS_LABEL) {
             uint32_t sect_n = getSymSectionNumber (info, sym);
             switch (sect_n) {
                 case PE_SECTION_UNDEFINED:
