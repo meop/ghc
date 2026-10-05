@@ -59,5 +59,12 @@ check`; hello world; `text`, `bytestring` and `containers` with `-O`; a
 `-threaded` program with `+RTS -N`; and a C FFI call. The log goes to
 `windows-aarch64/logs/`. The install stays on the host for manual use.
 
+Builds are also published as releases of
+[meop/ghc-windows-aarch64](https://github.com/meop/ghc-windows-aarch64), whose
+`test-ghc.yml` runs the same checks (`test-on-host.ps1`, copied there as
+`scripts/test-ghc.ps1`) on GitHub's `windows-11-arm` runners; the first,
+`ghc-10.1.20261004-55ec2d5e8d`, passed all of them there. Prefer that over the
+SSH host for repeatable checks.
+
 The rest of the checklist is in [TODO.md](TODO.md#windows-arm64-host-checklist);
 record each result there with the commit it ran against.
