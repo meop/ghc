@@ -101,6 +101,18 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   ShellCheck 0.11.0 with its test suite (2210 QuickCheck properties, PASS),
   hadolint 2.15.1 with its tests (742 examples, 0 failures). Patched
   packages are added only when the solver picks their exact version.
+- 2026-10-05: **GHC's testsuite runs natively on resin**
+  (`testsuite-on-host.sh`: the make driver against the installed GHC, in a
+  detached scheduled task, with MSYS2's make and sh). Fixes on the way:
+  - "testsuite: don't read config.top as a regex replacement template":
+    the driver passed a Windows path as an `re.sub` replacement, so every
+    makefile test failed with "bad escape \U".
+  - "rts/linker: register PE exception tables on AArch64 too": unloading
+    deleted `.pdata` tables that loading had only registered on x86_64
+    (testsuite `rts/linker/T20494`: "Unable to remove Exception handlers").
+- The version's snapshot date comes from the newest commit, so a notes commit
+  on a new day forced a full rebuild; `build-bootstrap.sh` now pins
+  `VERSION_DATE` to the GHC master base commit's date.
 - Packaging is a script for now. For upstream, Hadrian should do it: bundle the
   host toolchain into a target bindist and write `$tooldir` paths, as
   `SUBST_TOOLDIR` (`m4/subst_tooldir.m4`) does for native Windows builds, and
