@@ -5,6 +5,7 @@
 param(
     [Parameter(Mandatory)] [string] $Package,   # e.g. ShellCheck-0.11.0
     [string[]] $VersionArgs = @('--version'),
+    [switch] $Test,                             # also build and run its test suites
     [string] $AllowNewer = 'base,ghc-prim,ghc-bignum,template-haskell,containers,time,deepseq,bytestring,text,directory,filepath,process,Win32,array,os-string,file-io,stm,mtl,transformers,parsec,exceptions,binary,semaphore-compat',
     [int] $Jobs = 2
 )
@@ -101,6 +102,20 @@ Check "build $Package" {
 foreach ($exe in Get-ChildItem $bin -Filter '*.exe' -ErrorAction SilentlyContinue) {
     Check "$($exe.Name) $($VersionArgs -join ' ')" {
         (Invoke-Logged "run-$($exe.BaseName)" $exe.FullName $VersionArgs | Select-Object -First 3) -join ' / '
+    }
+}
+
+if ($Test) {
+    Check "test $Package" {
+        Push-Location $project
+        try {
+            $out = Invoke-Logged 'test' $cabal @(
+                'test', ($Package -replace '-[0-9.]+$', ''), '--enable-tests', "--with-compiler=$ghc",
+                "-j$Jobs", '--test-show-details=direct'
+            )
+        } finally { Pop-Location }
+        ($out | Select-String -Pattern 'Test suite .* (passed|failed)|examples?, \d+ failures?|tests? passed|\d+ out of \d+ tests failed' |
+            ForEach-Object { "$_".Trim() }) -join ' / '
     }
 }
 
