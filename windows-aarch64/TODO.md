@@ -218,6 +218,22 @@ the host is now acrylic, the Windows 11 ARM64 UTM guest on metal
       SpliceTypes, T20010(-ghci), T27331b, T18382, T26395), and codeGen
       CallConv (bad exit code 11, access violation — the #27684 area).
       Triage against an x86_64 Windows baseline is still to do.
+      Acrylic 2026-11-15, full native run on release
+      ghc-10.1.20261114 (aarch64-coff-linker 405a406474), SPEED=2
+      THREADS=4, 2h04m, twice (2026-11-14 and 2026-11-15, bit-identical
+      failure sets): 11365 tests / 41765 cases, 9956 expected passes, 129
+      expected failures, 153 unexpected failures, 52 framework failures,
+      525 fragile. The larger failure count vs 2026-11-14 is a newer
+      master (a week of upstream changes) plus a plugins pre_cmd cluster
+      (~55 tests: plugins*, TcPlugin_*, test-*-plugin,
+      multipleHomeUnits_plugin*) that is environmental, not compiler
+      bugs: the driver hands make a Windows-style TOP and msys make eats
+      the backslashes, so boilerplate.mk is never found
+      ("C:Usersmarshall.../mk/boilerplate.mk: No such file or
+      directory"). Excluding that cluster the two runs agree. CallConv
+      still fails the same way (root cause: Cmm ProcPoint
+      replacePPIds pushes the info label without TNTC; fix on
+      procpoint-entry-label-non-tntc).
 - [x] After milestone 3: run `ghci`, load a module, and build a Template
       Haskell program. (acrylic, 2026-11-14: multi-module interpreted load,
       main, TH splice at the prompt, Haskell exception catch — all pass.
