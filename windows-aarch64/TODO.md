@@ -101,6 +101,37 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
   ShellCheck 0.11.0 with its test suite (2210 QuickCheck properties, PASS),
   hadolint 2.15.1 with its tests (742 examples, 0 failures). Patched
   packages are added only when the solver picks their exact version.
+- 2026-11-14/15 (acrylic, the new ARM64 host): the effort moved forward and
+  upstream moved too.
+  - The branch is mirrored on GitHub as meop/ghc (`wip/windows-aarch64-native`
+    and the MR branches below); forking on gitlab.haskell.org still needs the
+    account promoted (get-verified issue
+    [#28129](https://gitlab.haskell.org/ghc/ghc/-/work_items/28129), filed
+    2026-11-14; the account is still `external`).
+  - All 15 test-on-host checks pass on acrylic against the released bindist
+    (ghc-10.1.20261002-492ccceb99, sha256 verified).
+  - Upstream merged #26924 (Stage3 cross-compiled target bindist), which
+    already contains the recache fix (e2938c3da7) and, verbatim, the ghc-bin
+    interpreter fix (2151ceeffc); master's `exe (tgtArchOs tgt)` supersedes
+    the program-suffix fix (89b51f76d7). Both hadrian commits are dropped
+    from the MR plan; two MR branches were cut from current master and pushed
+    to meop/ghc: `aarch64-coff-linker` (954c36af2e + fixup 55ec2d5e8d squashed
+    with eaff578e05 and 492ccceb99) and `testsuite-config-top-regex`
+    (1833b89e71). The linker branch cross-builds clean (47 min to stage 2).
+  - The hsc2hs CodeView fix was never implemented — the llvm-mingw pin
+    (887f06f131) was the workaround. Now implemented upstream:
+    [hsc2hs PR #109](https://github.com/haskell/hsc2hs/pull/109) (end a probe
+    value at a section change; also keeps values that reach EOF and stops
+    crashing on non-literal .asciz). Verified with llvm-mingw clang 19 and
+    clang 23 (byte-identical output), 93/93 hsc2hs tests. A release request
+    with the long-unreleased Windows AArch64 support is
+    [hsc2hs#108](https://github.com/haskell/hsc2hs/issues/108). When it lands,
+    bump the submodule and drop the llvm-mingw pin.
+  - network's one-line HsNetDef.h fix is upstream:
+    [haskell/network PR #651](https://github.com/haskell/network/pull/651)
+    (issue [#649](https://github.com/haskell/network/issues/649)), verified
+    natively on acrylic: all 29 modules compile and a
+    getAddrInfo/socket/bind smoke program runs.
 - 2026-10-05: **GHC's testsuite runs natively on resin**
   (`testsuite-on-host.sh`: the make driver against the installed GHC, in a
   detached scheduled task, with MSYS2's make and sh). Fixes on the way:
@@ -157,8 +188,11 @@ shipped as a release bindist, so projects can build Windows ARM64 binaries on
 
 ## Windows ARM64 host checklist
 
-The ARM64 host is resin, reached as `ssh metal -p 22222` (a port forward on
-metal): a Windows 11 26H2 ARM64 VM with 4 CPUs and 8 GB of RAM, code in `~/code`.
+The ARM64 host was resin, reached as `ssh metal -p 22222` (a port forward on
+metal): a Windows 11 26H2 ARM64 VM with 4 CPUs and 8 GB of RAM. Resin is gone;
+the host is now acrylic, the Windows 11 ARM64 UTM guest on metal
+(`delish acrylic`, `metal.lan:7391`), 4 CPUs, 10 GB RAM. Results before
+2026-11-14 were on resin; results after are on acrylic unless said otherwise.
 
 - [x] Install the milestone 1 bindist; confirm `ghc --info` reports
       `aarch64-unknown-mingw32` and the binary is native ARM64, not emulated.
@@ -166,9 +200,32 @@ metal): a Windows 11 26H2 ARM64 VM with 4 CPUs and 8 GB of RAM, code in `~/code`
 - [x] Compile and run a hello world, a program using `Data.Text` and
       `Data.ByteString`, and a threaded program (`-threaded`, `+RTS -N`).
       (resin, 2026-10-04, `test-on-host.sh`; also C FFI)
-- [ ] Build ShellCheck from source with `cabal build` and run its tests.
-- [ ] Run the GHC testsuite natively (`hadrian/build test`) from a source
-      tree, and record failures that do not occur on x86_64 Windows.
-- [ ] After milestone 3: run `ghci`, load a module, and build a Template
-      Haskell program.
+- [x] Build ShellCheck from source with `cabal build` and run its tests.
+      (resin 2026-10-04, 4.3 min; test suite: 2210 QuickCheck properties, PASS,
+      also on the `windows-11-arm` runner in meop/ghc-windows-aarch64
+      `test-packages` run 37287645105)
+- [x] Run the GHC testsuite natively (the make driver against the installed
+      GHC). Resin 2026-10-05: driver fixes (config.top regex, .pdata
+      unloading). Acrylic 2026-11-14, first full native run, release
+      ghc-10.1.20261002 (492ccceb99), SPEED=2 THREADS=4, 1h45m: 11365 tests /
+      41765 cases, 10063 expected passes, 129 expected failures, 46 unexpected
+      failures, 52 framework failures, 525 fragile. Failure clusters: plugin
+      loading (~18: all TcPlugin_*, plugins05, multipleHomeUnits_plugin*,
+      test-late-plugin, frontend01, plugins-ghci — plugins go through the RTS
+      linker and are DLLs on Windows), SIMD/constant bad stdout (10: simd*,
+      int64x2_*, word64x2_*, FloatConstant, IntConstant — expected outputs are
+      x86-shaped), interpreter/TH (8: T25374(ghci), T25636f(ghci),
+      SpliceTypes, T20010(-ghci), T27331b, T18382, T26395), and codeGen
+      CallConv (bad exit code 11, access violation — the #27684 area).
+      Triage against an x86_64 Windows baseline is still to do.
+- [x] After milestone 3: run `ghci`, load a module, and build a Template
+      Haskell program. (acrylic, 2026-11-14: multi-module interpreted load,
+      main, TH splice at the prompt, Haskell exception catch — all pass.
+      Findings: the bindist ships no ghci.exe — a Hadrian packaging gap; and
+      C++ objects still cannot be RTS-loaded because ghc.exe does not link the
+      C++/unwind runtime, so __gxx_personality_seh0 cannot resolve.)
+- [x] Exercise the .pdata unwind tables natively: an SEH __try/__except object
+      (raise and handler both in the RTS-loaded .o) catches through
+      linker-registered unwind tables in GHCi, reproducibly (acrylic,
+      2026-11-14, commit 492ccceb99).
 - [ ] Record each result here with the commit it ran against.
