@@ -3613,7 +3613,14 @@ async def runCmd(cmd: str,
     timeout = str(int(ceil(config.timeout * timeout_multiplier)))
 
     # Format cmd using config. Example: cmd='{hpc} report A.tix'
-    cmd = cmd.format(**config.__dict__)
+    #
+    # cmd is run by a Bourne shell, which treats backslashes as escapes. On
+    # Windows str(config.top) has backslashes, so a command
+    # like 'make TOP={top}' would lose them. Substitute the forward-slash form.
+    # On POSIX Path.as_posix() equals str(), so nothing changes there.
+    fmt = dict(config.__dict__)
+    fmt['top'] = config.top.as_posix()
+    cmd = cmd.format(**fmt)
     if_verbose(3, '%s< %s' % (cmd, stdin.name if isinstance(stdin, Path) else ''))
 
     stdin_file = stdin.open('rb') if stdin is not None else None
