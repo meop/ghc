@@ -270,3 +270,18 @@ runs, exact expected output (4.0/-2.0/8.0/2.0 twice), exit 0.
   deref once before jumping on this target.
 - `stg_ap_pp_fast`-style double loads are closure ENTERS (R → info →
   entry), not return-address reads — they were a false lead.
+
+## Update 3 — 2026-11-16, the x86_64-windows baseline
+
+Fetched from upstream CI (gitlab ghc/ghc, master pipeline 133474, commit
+b70226249739, job `x86_64-windows-validate-test`, junit.xml saved here as
+`x86_64-windows-master-junit.xml`): **12,008 test cases, 0 failures** on
+x86_64-windows master.
+
+Consequence: every entry in our 205-test problem set is a genuine
+aarch64-windows delta (or a local runner environment issue), not upstream
+Windows noise. Classification work remaining: subtract the ~55 plugins
+pre_cmd environmental cluster, then group the rest by mechanism
+(SIMD/constant expectations, interpreter/TH, framework) to order milestone
+4. The testsuite rerun with the release bindist + fixed CallConv asm is
+running; its delta vs 205 is the next data point.
