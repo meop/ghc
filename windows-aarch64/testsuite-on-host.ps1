@@ -47,8 +47,12 @@
 # Perf tests: runtests.py skips every performance test (forceSkipPerfTests) when the tree is
 # not a git checkout and there is no --metrics-file. The runner passes METRICS_FILE=
 # <Work>\logs\perf-metrics.tsv, so they run; the file collects their metrics (test, way, metric,
-# value) as the run appends them at its end. With no git baseline a new metric trivially passes,
-# so perf tests here measure and record but do not compare.
+# value) as the run appends them at its end. The metrics file alone is not enough: report_stats()
+# in testlib.py returns before it records anything unless `git rev-parse HEAD` works in the
+# tests directory (a perf test that runs outside a git checkout passes and stores nothing). So
+# the runner gives an extracted tree a throwaway git repository with one empty commit (the tree
+# has no hie.yaml in `git ls-files`, so req_ls_files tests stay skipped). With no baseline in
+# git notes a new metric trivially passes: perf tests here measure and record, not compare.
 #
 # Exit code: make's exit code if it ran; otherwise 10 refused (low disk at
 # start), 11 aborted (low disk during the run), 12 commit mismatch, 13 other
@@ -193,6 +197,15 @@ try {
         & $tarExe -xf $Tools -C $inplaceBin
         if ($LASTEXITCODE -ne 0) { throw "tar failed on $Tools : $LASTEXITCODE" }
         State "tools: $Tools -> $inplaceBin : $((Get-ChildItem $inplaceBin -File).Name -join ' ')" | Out-Null
+    }
+
+    # --- throwaway git repo so that perf metrics are recorded (see the header)
+    if (-not (Test-Path (Join-Path $root '.git'))) {
+        $git = Get-Command git -ErrorAction Stop
+        & $git.Source -C $root init -q
+        & $git.Source -C $root -c user.name=testsuite -c user.email=testsuite@localhost commit -q --allow-empty -m "testsuite tree $treeCommit"
+        if ($LASTEXITCODE -ne 0) { throw "git commit in $root failed: $LASTEXITCODE" }
+        State "git: empty repository with one commit in $root (perf metrics need git rev-parse HEAD)" | Out-Null
     }
 
     # --- per-run temp dir
