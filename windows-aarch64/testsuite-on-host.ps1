@@ -59,6 +59,19 @@
 # has no hie.yaml in `git ls-files`, so req_ls_files tests stay skipped). With no baseline in
 # git notes a new metric trivially passes: perf tests here measure and record, not compare.
 #
+# python3 and python for the test shell (T27). Some tests run a bare `python3` or `python` from a pre_cmd/cmd
+# (perf/compiler/all.T: T14766 runs `python3 genT14766.py`), and the make driver's sh looks them up on PATH. The
+# runner passes the interpreter it uses as PYTHON (-Python, by default ~\.local\bin\python.exe, a uv shim), but that
+# directory is on the PATH only of the user's own pwsh profile, not of an agent harness's shell, and msys has no
+# python: sh said `python3: command not found` (exit 127). So the runner creates $Work\pyshim with python3.exe and
+# python.exe, copies of the -Python file (a uv shim is a small launcher that finds the real interpreter by the path
+# stored in it, so a copy runs the same interpreter), and puts that directory first on the PATH of the make child.
+# That is narrower than prepending the directory of -Python, which would also expose everything else in it (here
+# claude.exe, gh.exe, glab.exe) to every test, and it works for sh and for native CreateProcess alike. Before make
+# starts, a login shell with the same environment (shell-check.sh in the logs dir) must resolve python3 and python
+# to the shim and run python3, or the run is refused (exit 13). The PATH the make child gets is written to
+# state.txt in the Windows form and in the msys form (`env: PATH ...` lines), with the shell's python3 lookup.
+#
 # Exit code: make's exit code if it ran; otherwise 10 refused (low disk at
 # start), 11 aborted (low disk during the run), 12 commit mismatch, 13 other
 # error.
@@ -139,7 +152,7 @@ try {
     # so the caller's environment keeps it.
     $noDefCwd = [Environment]::GetEnvironmentVariable('NoDefaultCurrentDirectoryInExePath')
     Remove-Item Env:NoDefaultCurrentDirectoryInExePath -ErrorAction SilentlyContinue
-    State "env: SystemRoot=$env:SystemRoot COMSPEC=$env:COMSPEC PATHEXT=$env:PATHEXT NoDefaultCurrentDirectoryInExePath=$(if ($null -eq $noDefCwd) { '(unset)' } else { "'$noDefCwd' in the caller, removed for the run" }) (inherited; the runner only sets TMP/TEMP/TMPDIR, removes NoDefaultCurrentDirectoryInExePath, and adds MSYSTEM, CHERE_INVOKING, MSYS2_PATH_TYPE and TEST_HC; PATH is not touched)"
+    State "env: SystemRoot=$env:SystemRoot COMSPEC=$env:COMSPEC PATHEXT=$env:PATHEXT NoDefaultCurrentDirectoryInExePath=$(if ($null -eq $noDefCwd) { '(unset)' } else { "'$noDefCwd' in the caller, removed for the run" }) (inherited; the runner only sets TMP/TEMP/TMPDIR, removes NoDefaultCurrentDirectoryInExePath, and adds MSYSTEM, CHERE_INVOKING, MSYS2_PATH_TYPE and TEST_HC; PATH only gets the pyshim dir in front, see the later PATH lines)"
 
     # --- free space at start
     $free = FreeGB
@@ -228,6 +241,40 @@ try {
 
     # inherit: keep the Windows PATH in MSYS2's login shell (the driver runs git).
     $env:MSYSTEM = 'MSYS'; $env:CHERE_INVOKING = '1'; $env:MSYS2_PATH_TYPE = 'inherit'
+
+    # python3 / python for the test shell: copies of $Python in a runner-owned dir, first on PATH (see the header).
+    $shim = Join-Path $Work 'pyshim'
+    New-Item -ItemType Directory -Force $shim | Out-Null
+    $pyHash = (Get-FileHash $Python).Hash
+    foreach ($n in 'python3.exe', 'python.exe') {
+        $d = Join-Path $shim $n
+        if (-not (Test-Path $d) -or (Get-FileHash $d).Hash -ne $pyHash) { Copy-Item -Force $Python $d }
+    }
+    $env:PATH = "$shim;$env:PATH"
+    State "env: PATH of the make child, Windows form ($($env:PATH.Length) chars; pyshim first) = $env:PATH" | Out-Null
+    # What a login shell with this environment sees: its PATH, and where python3/python resolve (also from `sh -c`, how the driver runs pre_cmd).
+    $chk = Join-Path $logs 'shell-check.sh'
+    $chkText = @'
+printf 'PATH=%s\n' "$PATH"
+printf 'python3=%s\n' "$(command -v python3)"
+printf 'python=%s\n' "$(command -v python)"
+printf 'sh-python3=%s\n' "$(sh -c 'command -v python3')"
+printf 'python3-version=%s\n' "$(python3 -c 'import sys; print(sys.version.split()[0], sys.executable)')"
+'@
+    [IO.File]::WriteAllText($chk, ($chkText -replace "`r`n", "`n") + "`n")
+    $chkOut = @(& $bash -l (MsysPath $chk) 2>&1 | ForEach-Object { "$_" })
+    $chkRc = $LASTEXITCODE
+    $chkMap = @{}
+    foreach ($l in $chkOut) { if ($l -match '^(PATH|python3|python|sh-python3|python3-version)=(.*)$') { $chkMap[$Matches[1]] = $Matches[2] } }
+    State "env: PATH of the test shell, msys form (bash -l, same environment; $($chkMap['PATH'].Length) chars) = $($chkMap['PATH'])" | Out-Null
+    State "env: test shell resolves python3=$($chkMap['python3']) python=$($chkMap['python']) sh -c python3=$($chkMap['sh-python3']); python3 runs: $($chkMap['python3-version']) (shell exit $chkRc)" | Out-Null
+    $shimMsys = (MsysPath $shim).ToLower()
+    foreach ($k in 'python3', 'python', 'sh-python3') {
+        if (-not $chkMap[$k] -or -not $chkMap[$k].ToLower().StartsWith($shimMsys + '/')) {
+            $reason = "test shell does not resolve $k to the pyshim dir ($shimMsys): '$($chkMap[$k])'"; $exitCode = 13; throw $reason
+        }
+    }
+    if ($chkRc -ne 0 -or -not $chkMap['python3-version']) { $reason = "python3 does not run in the test shell (exit $chkRc): $($chkOut -join ' | ')"; $exitCode = 13; throw $reason }
     $only = if ($Only) { "TEST='$Only'" } else { '' }
     $mt = MsysPath $runTmp
     # tests/linters/Makefile does not include boilerplate.mk, so it only sees CHANGELOG_D when hadrian passes it;
