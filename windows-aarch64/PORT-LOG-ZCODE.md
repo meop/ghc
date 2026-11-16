@@ -169,3 +169,26 @@ whichever mystery surfaced last.
   43779268303 (patches).
 - Stone logs: /tmp/ghc-fullclean-build.log (clean with first fix),
   /tmp/ghc-fix2-build.log (position-aware fix).
+
+## Update 2026-11-16 ~01:30 UTC
+
+Where things actually stand (in answer to "how far did you get, is the doc
+current?"):
+
+- Position-aware procpoint fix (bdc28c09d9): code complete and committed on
+  the branch, stage2 clean rebuild on stone still running (mid-compiler,
+  ~6000/~7000 modules). NOT yet validated on acrylic — the doc above said
+  "in validation" and that is still literally true.
+- test-packages: run 43779268303 failed AFTER this doc was written; the
+  failure is the same hard-error class one package further: semialign-1.4
+  (Data/Zip.hs, Zippy Monoid mappend). The strict and blaze-markup patches
+  WORKED (ShellCheck got past Tuple.hs; hadolint got past Internal.hs).
+  Fixed febd8e9 (same delete-the-dead-definition patch), run 43788101648
+  dispatched. Lesson: I added packages one CI run at a time instead of
+  enumerating every package in both plans up front for noncanonical
+  definitions — should have swept all candidate packages in one pass.
+- Work log itself: created 4e8e0bdb68; this section brings it current.
+
+Next steps unchanged: validate the fix bindist on acrylic when the build
+lands (15 checks + CallConv + SEH + GHCi), then push branch + release + CI,
+then the x86_64-windows baseline diff, then the full local testsuite rerun.
