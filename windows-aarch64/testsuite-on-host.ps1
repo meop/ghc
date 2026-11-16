@@ -23,6 +23,14 @@
 # testsuite-tree/COMMIT (what T04 produces), or the older layout with
 # testsuite/ at the archive root (no COMMIT; -ExpectTree then fails).
 #
+# Test tools: the testsuite calls check-ppr, check-exact, dump-decls, count-deps and
+# changelog-d from <tree>\inplace\bin (testsuite/mk/boilerplate.mk), which a bindist run
+# does not have. -Tools <zip> (e.g. testsuite-tools-<hash>.zip: the five .exe files, built
+# natively with the compiler under test) is extracted there after the tree is in place, also
+# with -NoExtract (an existing inplace\bin is overwritten file by file, nothing else is removed).
+# make also gets CHANGELOG_D=<inplace\bin\changelog-d.exe>, because tests/linters/Makefile does
+# not include boilerplate.mk and hadrian is what normally passes it.
+#
 # Exit code: make's exit code if it ran; otherwise 10 refused (low disk at
 # start), 11 aborted (low disk during the run), 12 commit mismatch, 13 other
 # error.
@@ -35,6 +43,7 @@ param(
     [string] $Only = '',                         # space-separated test names
     [string] $Python = (Join-Path $HOME '.local\bin\python.exe'),
     [switch] $NoExtract,                         # reuse an already-extracted $Work\src
+    [string] $Tools = '',                        # zip of test tool exes, extracted into <tree>\inplace\bin
     [string] $ExpectTree = '',                   # commit the test tree must be (prefix match)
     [string] $ExpectGhc = '',                    # commit the compiler must be (prefix match)
     [string] $Ghc = '',                          # ghc.exe to test; default: the only install\ghc-* dir
@@ -94,7 +103,7 @@ $exitCode = 13
 $runTmp = ''
 $aborted = $false
 try {
-    State "started: Work=$Work Msys2=$Msys2 Speed=$Speed Threads=$Threads Only='$Only' NoExtract=$NoExtract ExpectTree='$ExpectTree' ExpectGhc='$ExpectGhc'"
+    State "started: Work=$Work Msys2=$Msys2 Speed=$Speed Threads=$Threads Only='$Only' NoExtract=$NoExtract Tools='$Tools' ExpectTree='$ExpectTree' ExpectGhc='$ExpectGhc'"
 
     State "env: SystemRoot=$env:SystemRoot COMSPEC=$env:COMSPEC PATHEXT=$env:PATHEXT (inherited; the runner only sets TMP/TEMP/TMPDIR and adds MSYSTEM, CHERE_INVOKING and MSYS2_PATH_TYPE; PATH is not touched)"
 
@@ -148,6 +157,16 @@ try {
         $reason = "commit mismatch: test tree is '$treeCommit', expected '$ExpectTree'"; $exitCode = 12; throw $reason
     }
 
+    # --- test tools (inplace\bin), after the tree is in place; also with -NoExtract
+    if ($Tools) {
+        if (-not (Test-Path $Tools)) { throw "tools zip not found: $Tools" }
+        $inplaceBin = Join-Path $root 'inplace\bin'
+        New-Item -ItemType Directory -Force $inplaceBin | Out-Null
+        & $tarExe -xf $Tools -C $inplaceBin
+        if ($LASTEXITCODE -ne 0) { throw "tar failed on $Tools : $LASTEXITCODE" }
+        State "tools: $Tools -> $inplaceBin : $((Get-ChildItem $inplaceBin -File).Name -join ' ')" | Out-Null
+    }
+
     # --- per-run temp dir
     $runTmp = Join-Path $Work ('tmp-' + (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ'))
     New-Item -ItemType Directory -Force $runTmp | Out-Null
@@ -159,11 +178,15 @@ try {
     $env:MSYSTEM = 'MSYS'; $env:CHERE_INVOKING = '1'; $env:MSYS2_PATH_TYPE = 'inherit'
     $only = if ($Only) { "TEST='$Only'" } else { '' }
     $mt = MsysPath $runTmp
+    # tests/linters/Makefile does not include boilerplate.mk, so it only sees CHANGELOG_D when hadrian passes it;
+    # do the same when the tools are there. (The other tools get their default from boilerplate.mk.)
+    $changelogD = Join-Path $root 'inplace\bin\changelog-d.exe'
+    $toolVars = if ($Tools -and (Test-Path $changelogD)) { "CHANGELOG_D='$(MsysPath $changelogD)' " } else { '' }
     # /etc/profile resets TMP and TEMP to /tmp, so export them again after login.
     $cmd = "export TMP='$mt' TEMP='$mt' TMPDIR='$mt'; " +
            "make -C testsuite/tests test TEST_HC='$(MsysPath $ghc)' PYTHON='$(MsysPath $Python)' " +
            "THREADS=$Threads SPEED=$Speed SUMMARY_FILE='$(MsysPath (Join-Path $logs 'summary.txt'))' " +
-           "JUNIT_FILE='$(MsysPath (Join-Path $logs 'junit.xml'))' $only"
+           "JUNIT_FILE='$(MsysPath (Join-Path $logs 'junit.xml'))' $toolVars$only"
     State "running: $cmd" | Out-Null
 
     # cmd.exe merges stdout and stderr into the log; taskkill /T takes the whole tree.
