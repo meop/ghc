@@ -44,6 +44,11 @@
 #   config.debug_rts  = the "RTS way" of `ghc +RTS --info` (the way ghc.exe itself runs) has "debug" in it
 # Both values are written to state.txt at the start of a run.
 #
+# Environment of the make child: NoDefaultCurrentDirectoryInExePath is removed (an agent harness sets it, a user's shell
+# does not; with it cmd.exe does not search the current directory, so a test that runs a bare program name through
+# System.Process.shell fails), and TEST_HC is exported next to the make variable of the same name (Hadrian puts it in the
+# test environment; T18382 reads it). Both are recorded in `env:` lines of state.txt.
+#
 # Perf tests: runtests.py skips every performance test (forceSkipPerfTests) when the tree is
 # not a git checkout and there is no --metrics-file. The runner passes METRICS_FILE=
 # <Work>\logs\perf-metrics.tsv, so they run; the file collects their metrics (test, way, metric,
@@ -128,7 +133,13 @@ $aborted = $false
 try {
     State "started: Work=$Work Msys2=$Msys2 Speed=$Speed Threads=$Threads Only='$Only' NoExtract=$NoExtract Tools='$Tools' ExpectTree='$ExpectTree' ExpectGhc='$ExpectGhc'"
 
-    State "env: SystemRoot=$env:SystemRoot COMSPEC=$env:COMSPEC PATHEXT=$env:PATHEXT (inherited; the runner only sets TMP/TEMP/TMPDIR and adds MSYSTEM, CHERE_INVOKING and MSYS2_PATH_TYPE; PATH is not touched)"
+    # NoDefaultCurrentDirectoryInExePath=1 (an agent harness sets it in its own process environment; a user's shell does not)
+    # makes cmd.exe skip the current directory when it looks for a program, which breaks tests that run a bare program name
+    # through System.Process.shell (hWaitForInput-accurate-stdin). Remove it for this run: the runner is a child process,
+    # so the caller's environment keeps it.
+    $noDefCwd = [Environment]::GetEnvironmentVariable('NoDefaultCurrentDirectoryInExePath')
+    Remove-Item Env:NoDefaultCurrentDirectoryInExePath -ErrorAction SilentlyContinue
+    State "env: SystemRoot=$env:SystemRoot COMSPEC=$env:COMSPEC PATHEXT=$env:PATHEXT NoDefaultCurrentDirectoryInExePath=$(if ($null -eq $noDefCwd) { '(unset)' } else { "'$noDefCwd' in the caller, removed for the run" }) (inherited; the runner only sets TMP/TEMP/TMPDIR, removes NoDefaultCurrentDirectoryInExePath, and adds MSYSTEM, CHERE_INVOKING, MSYS2_PATH_TYPE and TEST_HC; PATH is not touched)"
 
     # --- free space at start
     $free = FreeGB
@@ -224,12 +235,14 @@ try {
     $changelogD = Join-Path $root 'inplace\bin\changelog-d.exe'
     $toolVars = if ($Tools -and (Test-Path $changelogD)) { "CHANGELOG_D='$(MsysPath $changelogD)' " } else { '' }
     # /etc/profile resets TMP and TEMP to /tmp, so export them again after login.
-    $cmd = "export TMP='$mt' TEMP='$mt' TMPDIR='$mt'; " +
+    # TEST_HC is also exported, as Hadrian does (hadrian/src/Rules/Test.hs); some tests read it from the environment (T18382).
+    $cmd = "export TMP='$mt' TEMP='$mt' TMPDIR='$mt' TEST_HC='$(MsysPath $ghc)'; " +
            "make -C testsuite/tests test TEST_HC='$(MsysPath $ghc)' PYTHON='$(MsysPath $Python)' " +
            "THREADS=$Threads SPEED=$Speed SUMMARY_FILE='$(MsysPath (Join-Path $logs 'summary.txt'))' " +
            "JUNIT_FILE='$(MsysPath (Join-Path $logs 'junit.xml'))' " +
            "METRICS_FILE='$(MsysPath (Join-Path $logs 'perf-metrics.tsv'))' " +
            "EXTRA_RUNTEST_OPTS='$extraOpts' $toolVars$only"
+    State "env: TEST_HC=$(MsysPath $ghc) exported to the make child (msys form, as passed to make)" | Out-Null
     State "running: $cmd" | Out-Null
 
     # cmd.exe merges stdout and stderr into the log; taskkill /T takes the whole tree.
