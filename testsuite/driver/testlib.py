@@ -1900,7 +1900,10 @@ async def do_test(name: TestName,
             makefile = src_makefile.read_text(encoding='UTF-8')
             # A function, not a template: a Windows config.top has backslashes,
             # which re.sub would read as escapes ("bad escape \U").
-            makefile = re.sub('TOP=.*', lambda _: 'TOP=%s' % config.top, makefile, count=1)
+            # Forward slashes, as for {top} in runCmd: sub-makes started by the
+            # test are passed TOP=$(TOP) through a shell, which would eat the
+            # backslashes of a Windows path.
+            makefile = re.sub('TOP=.*', lambda _: 'TOP=%s' % config.top.as_posix(), makefile, count=1)
             dst_makefile.write_text(makefile, encoding='UTF-8')
 
     if opts.pre_cmd:
