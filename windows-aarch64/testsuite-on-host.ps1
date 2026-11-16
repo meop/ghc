@@ -3,7 +3,7 @@
 # testsuite/mk/test.mk) against an installed GHC, using MSYS2's make and sh and
 # the host's Python.
 #
-# Writes $Work\logs\testsuite.log, summary.txt, junit.xml and state.txt.
+# Writes $Work\logs\testsuite.log, summary.txt, junit.xml, perf-metrics.tsv and state.txt.
 # The last line of state.txt is always "finished: <reason>" (written in a
 # finally block), unless the process itself is killed.
 #
@@ -30,6 +30,25 @@
 # with -NoExtract (an existing inplace\bin is overwritten file by file, nothing else is removed).
 # make also gets CHANGELOG_D=<inplace\bin\changelog-d.exe>, because tests/linters/Makefile does
 # not include boilerplate.mk and hadrian is what normally passes it.
+#
+# Coverage flags (T24). testsuite/mk/test.mk, the make driver, never passes config.have_ncg
+# (Hadrian does, RunTest.hs) and takes config.debug_rts from the compiler's list of RTS
+# ways ("RTS ways" in `ghc --info`, which names every way the install ships, debug among
+# them) instead of the way the compiler itself runs with. Left alone, have_ncg() is False
+# on a native-code-generator build, so llvm_build() is True: every th ext-interp case becomes
+# fragile_for(16087), `optasm` is dropped from numeric/should_run, and the NCG-only tests are
+# skipped; and debug_rts() is True, which runs T23142 and T25374 (they need `ghc +RTS -Di`)
+# and skips InternalCounters. So the runner does what Hadrian does, from this compiler, and
+# passes both through EXTRA_RUNTEST_OPTS:
+#   config.have_ncg   = `ghc --info` "Have native code generator" is YES
+#   config.debug_rts  = the "RTS way" of `ghc +RTS --info` (the way ghc.exe itself runs) has "debug" in it
+# Both values are written to state.txt at the start of a run.
+#
+# Perf tests: runtests.py skips every performance test (forceSkipPerfTests) when the tree is
+# not a git checkout and there is no --metrics-file. The runner passes METRICS_FILE=
+# <Work>\logs\perf-metrics.tsv, so they run; the file collects their metrics (test, way, metric,
+# value) as the run appends them at its end. With no git baseline a new metric trivially passes,
+# so perf tests here measure and record but do not compare.
 #
 # Exit code: make's exit code if it ran; otherwise 10 refused (low disk at
 # start), 11 aborted (low disk during the run), 12 commit mismatch, 13 other
@@ -133,6 +152,15 @@ try {
         $reason = "commit mismatch: ghc is '$ghcCommit', expected '$ExpectGhc'"; $exitCode = 12; throw $reason
     }
 
+    # --- coverage flags, derived from the compiler the way Hadrian does (see the header)
+    $haveNcg = $info -match '\("Have native code generator","YES"\)'
+    $rtsInfo = (& $ghc +RTS --info) -join "`n"
+    if ($rtsInfo -notmatch '\("RTS way",\s*"([^"]*)"\)') { throw 'no "RTS way" in the output of ghc +RTS --info' }
+    $rtsWay = $Matches[1]
+    $debugRts = $rtsWay -match 'debug'
+    $extraOpts = "-e config.have_ncg=$(if ($haveNcg) { 'True' } else { 'False' }) -e config.debug_rts=$(if ($debugRts) { 'True' } else { 'False' })"
+    State "coverage: ghc --info Have native code generator=$(if ($haveNcg) { 'YES' } else { 'not YES' }); ghc +RTS --info RTS way='$rtsWay'; EXTRA_RUNTEST_OPTS='$extraOpts'" | Out-Null
+
     # --- test tree
     $src = Join-Path $Work 'src'
     if ($NoExtract) {
@@ -186,7 +214,9 @@ try {
     $cmd = "export TMP='$mt' TEMP='$mt' TMPDIR='$mt'; " +
            "make -C testsuite/tests test TEST_HC='$(MsysPath $ghc)' PYTHON='$(MsysPath $Python)' " +
            "THREADS=$Threads SPEED=$Speed SUMMARY_FILE='$(MsysPath (Join-Path $logs 'summary.txt'))' " +
-           "JUNIT_FILE='$(MsysPath (Join-Path $logs 'junit.xml'))' $toolVars$only"
+           "JUNIT_FILE='$(MsysPath (Join-Path $logs 'junit.xml'))' " +
+           "METRICS_FILE='$(MsysPath (Join-Path $logs 'perf-metrics.tsv'))' " +
+           "EXTRA_RUNTEST_OPTS='$extraOpts' $toolVars$only"
     State "running: $cmd" | Out-Null
 
     # cmd.exe merges stdout and stderr into the log; taskkill /T takes the whole tree.
