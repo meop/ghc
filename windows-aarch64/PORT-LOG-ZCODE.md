@@ -192,3 +192,81 @@ current?"):
 Next steps unchanged: validate the fix bindist on acrylic when the build
 lands (15 checks + CallConv + SEH + GHCi), then push branch + release + CI,
 then the x86_64-windows baseline diff, then the full local testsuite rerun.
+
+
+## Update 2 — 2026-11-16, the procpoint saga resolved (correctly this time)
+
+Sections 2–5 above documented a hunt whose conclusion was wrong. The final
+story, with the full evidence chain:
+
+### The loop
+
+Every stone-built ghc.exe carrying ANY procpoint change died instantly at
+startup (silent exit, 0xC000009A):
+
+1. First fix (all `CmmBlock` literals → entry labels): dead. Minidump + cdb
+   showed the wild jump: closure info word = entry-code bytes, entered by
+   `ldr x17,[x20]; ldr x17,[x17]; br x17`.
+2. Position-aware fix (heap stores → info, stack pushes/calls → entry):
+   also dead, same signature, even after a full stage2 wipe (a rebuild with
+   stale objects first produced a false confirmation of the same diagnosis).
+3. The revert "experiment" (§4) was invalid — stale `ReadP.o`.
+
+### The resolution — upstream was right all along
+
+Diffing relocations in `ReadP.o` (correct object, position-aware compiler):
+
+- `stur x17, [x21, #-0x18]` (x21 = Hp — heap info words): relocates to
+  **.data** (info tables) — my fix's classification, "correct" by my model.
+- `stur x17, [x20, #-0x18]` (x20 = Sp — pushed return addresses): relocates
+  to **.text** (entry code) — my fix's classification.
+
+But the consumer of a pushed return address is the **RTS/Cmm return
+convention**: `jump %ENTRY_CODE(Sp(0))`, where without TNTC `entryCode` is
+one dereference — `ldr x17,[x20]; ldr x17,[x17]; br x17`. The pushed value
+must be an **info label**; the return path dereferences it. My "entry"
+pushes made every continuation return execute instruction bytes. That exact
+sequence was the crash.
+
+So the upstream pre-fix `replacePPIds` (rewrite ALL procpoint references to
+the info label) is correct for this target: heap closures need info words
+(data), and stack-pushed return addresses are consumed info-style by every
+Cmm/RTS return path.
+
+### The actual gap: the CallConv test's hand-written asm
+
+The one consumer that jumps to a pushed value directly — no deref — is the
+hand-written callee in `testsuite/tests/codeGen/should_run/
+CallConv_aarch64.s`: `ldr x8, [x20]; blr x8`. That assumes TNTC, where
+info == entry. On aarch64-unknown-mingw32 it executed the info table = the
+original "access violation executing data". This is a TEST bug, not a
+compiler bug: `foreign import prim` continuations follow the standard
+pushed-info-pointer convention.
+
+Fix (fork wip branch, 26517e2e63): deref then jump — `ldr x8, [x20];
+ldr x8, [x8]; br x8` in both someFuncF and someFuncD. Verified on acrylic
+against the STOCK release bindist (no compiler change): CallConv compiles,
+runs, exact expected output (4.0/-2.0/8.0/2.0 twice), exit 0.
+
+### Consequences
+
+- Branch `procpoint-entry-label-non-tntc` deleted (reset to master);
+  the build tree reset to `aarch64-coff-linker` 405a406474. No compiler
+  change is needed for this cluster; nothing to push upstream from it.
+- The baseline's CallConv failure is removed by the testsuite fix, synced
+  into the local runner tree. A full rerun with the release bindist is
+  started; the remaining failure set needs reclassification against the
+  x86_64-windows baseline (still planned).
+- Compiler-change lesson (general): a Cmm-level codegen change does not
+  rebuild library objects incrementally (fingerprints don't track the
+  compiler), and a revert experiment MUST wipe the objects compiled by the
+  changed compiler. Both were violated once each; both cost hours.
+
+### Convention facts established (for milestone 4 / #27684 work)
+
+- Non-TNTC: `ENTRY_CODE(x)` = `[x]` (one deref); pushed return addresses
+  are info pointers; heap closure info words are info labels.
+- Hand-written asm receiving a pushed return address (prim callees) must
+  deref once before jumping on this target.
+- `stg_ap_pp_fast`-style double loads are closure ENTERS (R → info →
+  entry), not return-address reads — they were a false lead.
