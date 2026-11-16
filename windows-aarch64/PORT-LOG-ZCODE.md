@@ -285,3 +285,18 @@ pre_cmd environmental cluster, then group the rest by mechanism
 (SIMD/constant expectations, interpreter/TH, framework) to order milestone
 4. The testsuite rerun with the release bindist + fixed CallConv asm is
 running; its delta vs 205 is the next data point.
+
+## Update 4 — 2026-11-16, test-packages fully green
+
+Run 43788101648 (release ghc-10.1.20261114-405a406474 on the
+windows-11-arm runner): native ARM64 cabal.exe builds and self-hosts,
+ShellCheck 0.11.0 builds + test suite passes, hadolint 2.15.1 builds +
+742/742 tests pass. The per-patch version probe selected the right subset
+per build (network only for cabal-install; semialign+strict for
+ShellCheck; blaze-markup+Cabal-3.12+semialign+strict for hadolint),
+confirming 39cb2d1 + c946fb8 + febd8e9 work as designed.
+
+The noncanonical-instance patches (strict, blaze-markup, semialign) are
+workarounds for GHC master making noncanonical definitions hard errors;
+the real fix belongs upstream in those packages. When upstream releases
+patched versions, the stored patches can be dropped.
