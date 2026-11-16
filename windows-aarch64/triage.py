@@ -2,12 +2,19 @@
 """Turn a GHC testsuite junit.xml into a TSV: test, way, result, first-error-line.
 
 Usage (from anywhere):
-    uv run --no-project python -I triage.py JUNIT.xml [-o OUT.tsv]
+    uv run --no-project python -I triage.py JUNIT.xml [-o OUT.tsv] [--fragile-log testsuite.log]
     uv run --no-project python -I triage.py --join A=a.tsv B=b.tsv X=x.tsv [-o joined.tsv]
     uv run --no-project python -I triage.py JUNIT.xml --show 'REGEX'   # full bodies of matching failures
 
 result is one of: pass, fail (unexpected failure), framework (framework failure),
-fragile (skipped "fragile failure"), skip (any other <skipped>).
+fragile (skipped "fragile failure": the test is fragile and it failed), skip (any other <skipped>),
+fragile-pass (only with --fragile-log: the test is fragile and it passed).
+
+The driver writes a fragile test that PASSED into the junit as a plain pass (junit.py:
+`t.expected_passes + t.expected_failures + t.fragile_passes`), so the junit alone cannot tell
+it from a normal pass. testlib.py prints `*** fragile test NAME(WAY) resulted in pass|fail`
+for every fragile test case, and that line is in testsuite.log (and in the CI job log).
+--fragile-log reads those lines and relabels the matching `pass` rows as `fragile-pass`.
 Expected failures are reported by the driver as passes, so they appear as pass.
 
 first-error-line is "<message> | <first informative line of the body>", with tabs and
@@ -49,7 +56,27 @@ def first_line(text):
     return cands[0].strip() if cands else ""
 
 
-def parse(path):
+FRAG = re.compile(r"^\*\*\* fragile test (.*)\(([^()]*)\) resulted in (pass|fail)\s*$")
+ANSI = re.compile("\x1b" + r"\[[0-9;]*[A-Za-z]")
+
+
+def fragile_log(path):
+    """{(test, way): 'pass'|'fail'} from the driver's '*** fragile test' lines."""
+    d = {}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            # CI job logs may carry ANSI colour codes
+            line = ANSI.sub("", line)
+            i = line.find("*** fragile test ")
+            if i < 0:
+                continue
+            m = FRAG.match(line[i:].rstrip("\r\n"))
+            if m:
+                d[(m.group(1), m.group(2))] = m.group(3)
+    return d
+
+
+def parse(path, fraglog=None):
     rows = []
     for ev, el in ET.iterparse(path, events=("end",)):
         if el.tag != "testcase":
@@ -72,6 +99,8 @@ def parse(path):
             info = msg if (not body or body == msg) else f"{msg} | {body}"
             break
         info = re.sub(r"[\t\r\n]+", " ", info)[:400]
+        if res == "pass" and fraglog and fraglog.get((test, way)) == "pass":
+            res = "fragile-pass"
         rows.append((test, way, res, info))
         el.clear()
     return rows
@@ -125,6 +154,7 @@ def main():
     ap.add_argument("inputs", nargs="+")
     ap.add_argument("-o", "--output")
     ap.add_argument("--join", action="store_true", help="inputs are LABEL=file.tsv")
+    ap.add_argument("--fragile-log", metavar="LOG", help="testsuite.log / CI job log: relabel fragile passes")
     ap.add_argument("--show", metavar="REGEX", help="print full bodies of failing cases matching REGEX")
     a = ap.parse_args()
     if a.show:
@@ -136,7 +166,7 @@ def main():
     else:
         if len(a.inputs) != 1:
             ap.error("one junit file expected")
-        write_tsv(parse(a.inputs[0]), out)
+        write_tsv(parse(a.inputs[0], fragile_log(a.fragile_log) if a.fragile_log else None), out)
     if a.output:
         out.close()
 
