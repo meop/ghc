@@ -298,7 +298,11 @@ if windows:
 
     # Add ghc packages to PATH
     try:
-        pkginfo = getStdout([config.ghc_pkg, 'dump'])
+        # Ask for ${pkgroot} to be expanded. Otherwise the entries are relative
+        # paths ('${pkgroot}/../lib/...') that don't exist, and msys, which
+        # converts PATH for each native child, then turns the whole of PATH
+        # into an empty string.
+        pkginfo = getStdout([config.ghc_pkg, 'dump', '--expand-pkgroot'])
     except FileNotFoundError as err:
         # This can happen when we are only running tests which don't depend on ghc (ie linters)
         # In that case we probably haven't built ghc-pkg yet so this query will fail.
@@ -317,7 +321,11 @@ if windows:
                 path = re.sub(r'^"(.*)"$', r'\1', path)
                 path = re.sub(r'\\(.)', r'\1', path)
             path = format_path(path)
-            newPaths.add(path)
+            # Only a directory that holds DLLs can matter here. The others only
+            # make PATH longer, and cmd.exe does not search a PATH of more than
+            # 8191 characters (a ghc-pkg database has dozens of entries).
+            if os.path.isdir(path) and any(f.lower().endswith('.dll') for f in os.listdir(path)):
+                newPaths.add(path)
 
     for path in newPaths:
         ghc_env['PATH'] = os.pathsep.join([path, ghc_env.get("PATH", "")])
