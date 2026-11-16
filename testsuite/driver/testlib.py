@@ -1886,7 +1886,11 @@ async def do_test(name: TestName,
         dst_makefile = in_testdir('Makefile')
         if src_makefile.exists():
             makefile = src_makefile.read_text(encoding='UTF-8')
-            makefile = re.sub('TOP=.*', 'TOP=%s' % config.top, makefile, count=1)
+            # The forward-slash form: sub-makes started by the test pass
+            # TOP=$(TOP) to a shell, which would eat the backslashes of a
+            # Windows path. (It also has no backslash escapes for re.sub to
+            # choke on.)
+            makefile = re.sub('TOP=.*', 'TOP=%s' % config.top.as_posix(), makefile, count=1)
             dst_makefile.write_text(makefile, encoding='UTF-8')
 
     if opts.pre_cmd:
