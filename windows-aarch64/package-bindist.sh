@@ -12,6 +12,8 @@
 #   OUT_DIR  where the .tar.gz goes (default: _build/windows-aarch64)
 #   CACHE    download cache (default: ~/.cache/ghc-windows-aarch64)
 #   LLVM_MINGW_VERSION  defaults to install-toolchain.sh's pin
+#   CROSS_GHC_PKG  the cross ghc-pkg, to rebuild package.cache after the package edits
+#                  (default: _build/stage1/bin/aarch64-unknown-mingw32-ghc-pkg)
 set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -76,6 +78,36 @@ fi
 for tool in $(grep -o '\$tooldir/mingw/bin/[^"]*' "$dist/lib/targets/default.target" | sort -u); do
   [[ -f $dist/${tool#\$tooldir/} ]] || { echo "missing bundled tool: $tool" >&2; exit 1; }
 done
+
+# C++. llvm-mingw's clang++ finds libc++ (its headers, and the library to
+# link) through a config file named after the triple the driver normalises the
+# target to: aarch64-w64-windows-gnu.cfg, for the aarch64-w64-mingw32 driver
+# name. The target file passes --target=aarch64-unknown-windows-gnu, whose
+# config file name does not exist, so the driver falls back to libstdc++'s
+# search paths, none of which are there: `#include <iostream>` fails. Ask for
+# libc++ outright. (The x86_64 bundle sets no -stdlib either; m4/fp_setup_windows_toolchain.m4
+# names libc++ as its C++ library, so its MSYS2 clang must default to it.)
+cxx_flags='"--target=aarch64-unknown-windows-gnu"'
+sed -i "/tgtCxxCompiler/s|prgFlags = \[$cxx_flags\]|prgFlags = [$cxx_flags,\"-stdlib=libc++\"]|" "$dist/lib/targets/default.target"
+grep -q 'tgtCxxCompiler.*"-stdlib=libc++"' "$dist/lib/targets/default.target" \
+  || { echo "C++ compiler flags not rewritten in default.target" >&2; exit 1; }
+
+# system-cxx-std-lib. The cross configure probed `-lc++ -lc++abi`, which lld
+# resolves to llvm-mingw's DLL import libraries: executables would need
+# libc++.dll and libunwind.dll at run time, and those live in
+# mingw/aarch64-w64-mingw32/bin, which nothing puts on PATH. Link the static
+# libraries, as the x86_64 bundle does (CXX_STD_LIB_LIBS=":libc++.a
+# :libc++abi.a" in m4/fp_setup_windows_toolchain.m4). llvm-mingw's libc++abi.a
+# leaves the unwinder (_Unwind_RaiseException and friends) to libunwind.a.
+# GHC reads only package.cache, so the edit needs a recache; the cross
+# ghc-pkg does it on the files in place.
+pkgdb=$dist/lib/package.conf.d
+cxx_conf=$pkgdb/system-cxx-std-lib-1.0.conf
+sed -i -E 's/^(extra-libraries(-static)?:) +c\+\+ c\+\+abi *$/\1 :libc++.a :libc++abi.a :libunwind.a/' "$cxx_conf"
+[[ $(grep -c '^extra-libraries.*: :libc++.a :libc++abi.a :libunwind.a$' "$cxx_conf") == 2 ]] \
+  || { echo "system-cxx-std-lib extra-libraries not rewritten:" >&2; grep -n 'extra-libraries' "$cxx_conf" >&2; exit 1; }
+: "${CROSS_GHC_PKG:=$root/_build/stage1/bin/aarch64-unknown-mingw32-ghc-pkg}"
+"$CROSS_GHC_PKG" --global-package-db "$pkgdb" recache
 
 # settings names unlit with the cross prefix, but the bindist ships unlit.exe.
 sed -i -e 's|"\$topdir/../bin/aarch64-unknown-mingw32-unlit"|"\$topdir/../bin/unlit.exe"|' -e 's|"\$topdir/../bin/unlit"|"\$topdir/../bin/unlit.exe"|' "$dist/lib/settings"
