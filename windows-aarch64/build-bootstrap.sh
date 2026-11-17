@@ -15,6 +15,13 @@
 #   JOBS     Hadrian parallelism (default 4)
 #   FLAVOUR  Hadrian flavour, before +native_bignum (default quick)
 #   TARGET   Hadrian target (default stage3:exe:ghc-bin)
+#   DOCS     Hadrian --docs value (default none). With anything else the bindist
+#            gets the .haddock files of the libraries (doc/html/libraries/*), which
+#            the haddock tests need. no-sphinx builds only those, with no Sphinx or
+#            LaTeX; x86_64 Windows CI passes no-sphinx-pdfs, which adds the user
+#            guide and the man page.
+#   RESUME=1 skip ./boot and ./configure and keep _build, to add targets (such
+#            as docs) to an existing build. Needs the same FLAVOUR as that build.
 #   CLEAN=1  remove _build first
 # Run it under windows-aarch64/run-capped.sh to cap its memory.
 
@@ -24,6 +31,7 @@ cd "$(dirname "$0")/.."
 : "${JOBS:=4}"
 : "${FLAVOUR:=quick}"
 : "${TARGET:=stage3:exe:ghc-bin}"
+: "${DOCS:=none}"
 export PATH="$HOME/.ghcup/bin:$PATH"
 
 start=$(date +%s)
@@ -42,20 +50,22 @@ date -u -d "@$(git log -1 --format=%ct "$base")" +%Y%m%d > VERSION_DATE
 grep -qx '/VERSION_DATE' .git/info/exclude 2>/dev/null || echo '/VERSION_DATE' >> "$(git rev-parse --git-dir)/info/exclude"
 echo "VERSION_DATE $(cat VERSION_DATE) (from $(git log -1 --format='%h %cs' "$base"))"
 
-stamp boot
-./boot
+if [[ "${RESUME:-}" != 1 ]]; then
+    stamp boot
+    ./boot
 
-stamp configure
-# The cross toolchain variables must reach configure only: Hadrian builds
-# itself as a normal Linux program and would otherwise use the cross compiler.
-(
-    . windows-aarch64/env.sh
-    ./configure --target=aarch64-unknown-mingw32 \
-        --with-intree-gmp --enable-strict-ghc-toolchain-check
-)
+    stamp configure
+    # The cross toolchain variables must reach configure only: Hadrian builds
+    # itself as a normal Linux program and would otherwise use the cross compiler.
+    (
+        . windows-aarch64/env.sh
+        ./configure --target=aarch64-unknown-mingw32 \
+            --with-intree-gmp --enable-strict-ghc-toolchain-check
+    )
+fi
 
-stamp "hadrian flavour=$FLAVOUR+native_bignum jobs=$JOBS target=$TARGET"
-hadrian/build --flavour="$FLAVOUR+native_bignum" --docs=none -j"$JOBS" "$TARGET"
+stamp "hadrian flavour=$FLAVOUR+native_bignum docs=$DOCS jobs=$JOBS target=$TARGET"
+hadrian/build --flavour="$FLAVOUR+native_bignum" --docs="$DOCS" -j"$JOBS" "$TARGET"
 
 stamp done
 ls -la _build/stage2/bin/ _build/bindist/ 2>/dev/null || true
