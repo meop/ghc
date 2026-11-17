@@ -105,6 +105,23 @@
 #   - The make command now lives in logs\run-make.sh (run with bash -l), not in a -lc string, so that the double
 #     quotes of the -e option need no extra quoting layer.
 #
+# Sweep of finished iserv files (T40; the cause is in runs\2026-11-16-T33-tmp\NOTES.md). A test that starts GHC's external
+# interpreter (th ext-interp, ghci-ext: a splice or a ghci evaluation) leaves ghc<pid>_tmp_<n>\ghc_tmp_1.iserv, a 27.5 MiB
+# executable, in the run's temp dir: GHC deletes its temp files before it stops the interpreter, and Windows refuses to
+# delete a running .exe. A full run piles up ~14 GiB that way until the temp dir is removed at the end. So every pass
+# of the wait loop below (about every 15 s) the runner sweeps the run's temp dir:
+#   - it tries to delete every ghc<pid>_tmp_*\*.iserv, and ignores the error for a file that is still in use (a running
+#     interpreter keeps its file locked, so such a file survives);
+#   - it only looks at a directory whose owner, the ghc process named by <pid>, no longer exists. Being unlocked is not
+#     enough: GHC links the iserv eagerly (initInterpreter) but starts it lazily at the first splice, so a live ghc
+#     can have an unlocked .iserv it has not started yet, and deleting that would break the test;
+#   - it removes a ghc<pid>_tmp_* directory (non-recursively, so only an empty one goes) that is empty, whose owner is
+#     gone and that was created more than 3 minutes ago;
+#   - it deletes nothing else.
+# Each sweep that removes something writes one `iserv-sweep:` line (files, MiB freed, run total so far) to state.txt, and the
+# end-of-run lines carry the run's total. -NoIservSweep turns the sweep off (the temp dir then grows as before and is
+# removed at the end). A sweep that fails is logged once and does not stop the run.
+#
 # Exit code: make's exit code if it ran; otherwise 10 refused (low disk at
 # start), 11 aborted (low disk during the run), 12 commit mismatch, 13 other
 # error.
@@ -125,7 +142,8 @@ param(
     [double] $AbortFreeGB = 5,
     [int] $LogEveryMinutes = 10,
     [int] $ProcessMemoryMB = 4096,               # per-process commit cap (job object); 0 = no cap
-    [switch] $NoTimeline                         # no -v3, no timeline.tsv
+    [switch] $NoTimeline,                        # no -v3, no timeline.tsv
+    [switch] $NoIservSweep                       # do not delete finished ghc*_tmp_*\*.iserv files during the run
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -171,6 +189,38 @@ function SweepStragglers {
     } | ForEach-Object {
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         State "swept straggler $($_.ProcessId) $($_.Name)" | Out-Null
+    }
+}
+
+# One sweep of the run's temp dir for finished iserv files (see the header). Updates the totals, logs one line per
+# sweep that removed something. Never throws.
+$script:sweepFiles = 0; $script:sweepBytes = [long] 0; $script:sweepDirs = 0; $script:sweepErrorLogged = $false
+function IservSweep([string] $tmp) {
+    try {
+        $live = New-Object 'System.Collections.Generic.HashSet[int]'
+        foreach ($p in [Diagnostics.Process]::GetProcesses()) { [void] $live.Add($p.Id); $p.Dispose() }
+        $files = 0; $bytes = [long] 0; $dirs = 0
+        $young = (Get-Date).ToUniversalTime().AddMinutes(-3)
+        foreach ($d in @(Get-ChildItem -LiteralPath $tmp -Directory -Filter 'ghc*_tmp_*' -Force -ErrorAction SilentlyContinue)) {
+            $owner = 0
+            if ($d.Name -notmatch '^ghc(\d+)_tmp_' -or -not [int]::TryParse($Matches[1], [ref] $owner)) { continue }
+            if ($live.Contains($owner)) { continue }   # its ghc may still start the interpreter
+            foreach ($f in @(Get-ChildItem -LiteralPath $d.FullName -File -Filter '*.iserv' -Force -ErrorAction SilentlyContinue)) {
+                if ($f.Extension -ne '.iserv') { continue }
+                $len = $f.Length
+                try { [IO.File]::Delete($f.FullName) } catch { }   # in use (a running interpreter): leave it
+                if (-not [IO.File]::Exists($f.FullName)) { $files++; $bytes += $len }
+            }
+            if ($d.CreationTimeUtc -lt $young -and @(Get-ChildItem -LiteralPath $d.FullName -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+                try { [IO.Directory]::Delete($d.FullName, $false); $dirs++ } catch { }
+            }
+        }
+        $script:sweepFiles += $files; $script:sweepBytes += $bytes; $script:sweepDirs += $dirs
+        if ($files -gt 0) {
+            State "iserv-sweep: removed $files .iserv file(s), $([math]::Round($bytes / 1MB, 1)) MiB freed ($dirs empty ghc*_tmp_* dir(s) removed); run total so far $($script:sweepFiles) files, $([math]::Round($script:sweepBytes / 1MB, 1)) MiB" | Out-Null
+        }
+    } catch {
+        if (-not $script:sweepErrorLogged) { $script:sweepErrorLogged = $true; State "iserv-sweep: error (logged once, the run goes on): $($_.Exception.Message)" | Out-Null }
     }
 }
 
@@ -380,7 +430,7 @@ $runTmp = ''
 $aborted = $false
 $job = $null
 try {
-    State "started: Work=$Work Msys2=$Msys2 Speed=$Speed Threads=$Threads Only='$Only' NoExtract=$NoExtract Tools='$Tools' ExpectTree='$ExpectTree' ExpectGhc='$ExpectGhc' ProcessMemoryMB=$ProcessMemoryMB NoTimeline=$NoTimeline"
+    State "started: Work=$Work Msys2=$Msys2 Speed=$Speed Threads=$Threads Only='$Only' NoExtract=$NoExtract Tools='$Tools' ExpectTree='$ExpectTree' ExpectGhc='$ExpectGhc' ProcessMemoryMB=$ProcessMemoryMB NoTimeline=$NoTimeline NoIservSweep=$NoIservSweep"
 
     # NoDefaultCurrentDirectoryInExePath=1 (an agent harness sets it in its own process environment; a user's shell does not)
     # makes cmd.exe skip the current directory when it looks for a program, which breaks tests that run a bare program name
@@ -570,6 +620,7 @@ printf 'python3-version=%s\n' "$(python3 -c 'import sys; print(sys.version.split
     $next = Get-Date
     while (-not $job.WaitForExit(15000)) {
         foreach ($e in $job.DrainEvents()) { State "memory-cap: $e" | Out-Null }
+        if (-not $NoIservSweep) { IservSweep $runTmp }
         $free = FreeGB
         if ($free -lt $AbortFreeGB) {
             $aborted = $true
@@ -603,6 +654,7 @@ printf 'python3-version=%s\n' "$(python3 -c 'import sys; print(sys.version.split
             $job.Dispose()   # stops the timeline thread after a last pass over the log
             if (-not $NoTimeline) { State "timeline: $($job.TimelineLines) marker lines in $(Join-Path $logs 'timeline.tsv')" | Out-Null }
         }
+        State "iserv-sweep: run total $($script:sweepFiles) .iserv file(s), $([math]::Round($script:sweepBytes / 1MB, 1)) MiB removed during the run, $($script:sweepDirs) empty ghc*_tmp_* dir(s) removed (sweep $(if ($NoIservSweep) { 'off: -NoIservSweep' } else { 'on' }))" | Out-Null
         if ($runTmp -and (Test-Path $runTmp)) {
             $leaked = @(Get-ChildItem $runTmp -Force -ErrorAction SilentlyContinue).Count
             # A program still running from the temp dir (GHC's temp executables) keeps it locked: stop it, then retry.
