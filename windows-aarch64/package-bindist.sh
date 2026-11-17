@@ -109,6 +109,28 @@ sed -i -E 's/^(extra-libraries(-static)?:) +c\+\+ c\+\+abi *$/\1 :libc++.a :libc
 : "${CROSS_GHC_PKG:=$root/_build/stage1/bin/aarch64-unknown-mingw32-ghc-pkg}"
 "$CROSS_GHC_PKG" --global-package-db "$pkgdb" recache
 
+# Library docs. When the build made them (build-bootstrap.sh DOCS=no-sphinx),
+# the bindist has doc/html/libraries/<pkg>-<version>/<pkg>.haddock beside lib/.
+# The package confs still name them as in the build tree, where doc/ is a
+# sibling of the stage's lib/: ${pkgroot}/../../doc/... (pkgroot is lib/). In the
+# bindist, doc/ is next to lib/, so one level up less. `make install` rewrites
+# these paths for its docdir (patchpackageconf in the bindist's Makefile); this
+# bindist is used where it is unpacked, so make the same edit for doc/. Without
+# it haddock fails on its first dependency ("array.haddock: withBinaryFile: does
+# not exist") and the haddock tests fail.
+if [[ -d $dist/doc/html/libraries ]]; then
+  sed -i 's|${pkgroot}/\.\./\.\./doc/html/libraries/|${pkgroot}/../doc/html/libraries/|' "$pkgdb"/*.conf
+  pkgroot_prefix='${pkgroot}/'
+  n=0
+  for f in $(grep -l '^haddock-interfaces:' "$pkgdb"/*.conf); do
+    h=$(grep -A1 '^haddock-interfaces:' "$f" | grep -o '\${pkgroot}/[^ ]*\.haddock' | head -1)
+    [[ -n $h && -f $dist/lib/${h#"$pkgroot_prefix"} ]] || { echo "$(basename "$f"): haddock-interfaces does not name a file in the bindist: ${h:-none}" >&2; exit 1; }
+    n=$((n + 1))
+  done
+  echo "docs: haddock-interfaces of $n packages point at doc/html/libraries"
+  "$CROSS_GHC_PKG" --global-package-db "$pkgdb" recache
+fi
+
 # settings names unlit with the cross prefix, but the bindist ships unlit.exe.
 sed -i -e 's|"\$topdir/../bin/aarch64-unknown-mingw32-unlit"|"\$topdir/../bin/unlit.exe"|' -e 's|"\$topdir/../bin/unlit"|"\$topdir/../bin/unlit.exe"|' "$dist/lib/settings"
 grep -q '"\$topdir/../bin/unlit.exe"' "$dist/lib/settings" || { echo "unlit setting not rewritten" >&2; exit 1; }
