@@ -78,7 +78,7 @@ for tool in $(grep -o '\$tooldir/mingw/bin/[^"]*' "$dist/lib/targets/default.tar
 done
 
 # settings names unlit with the cross prefix, but the bindist ships unlit.exe.
-sed -i 's|"\$topdir/../bin/aarch64-unknown-mingw32-unlit"|"$topdir/../bin/unlit.exe"|' "$dist/lib/settings"
+sed -i -e 's|"\$topdir/../bin/aarch64-unknown-mingw32-unlit"|"\$topdir/../bin/unlit.exe"|' -e 's|"\$topdir/../bin/unlit"|"\$topdir/../bin/unlit.exe"|' "$dist/lib/settings"
 grep -q '"\$topdir/../bin/unlit.exe"' "$dist/lib/settings" || { echo "unlit setting not rewritten" >&2; exit 1; }
 
 tarball=$OUT_DIR/$name.tar.gz
