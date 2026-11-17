@@ -72,6 +72,39 @@
 # to the shim and run python3, or the run is refused (exit 13). The PATH the make child gets is written to
 # state.txt in the Windows form and in the msys form (`env: PATH ...` lines), with the shell's python3 lookup.
 #
+# Stability (T34).
+#   - Per-process memory cap. The make child is started suspended, put in a Windows Job object whose limit is
+#     JOB_OBJECT_LIMIT_PROCESS_MEMORY (each process may commit at most -ProcessMemoryMB; 0 = no limit, the job then
+#     only does the accounting), and resumed, so every process the run starts (make, python, timeout, ghc, the test
+#     programs) is in it. It is a per-process limit, not a whole-job one: a test that runs away fails alone, with
+#     the allocation failing inside it (a GHC program reports `getMBlocks: VirtualAlloc MEM_COMMIT failed`, as it did
+#     when concprog001 exhausted the host in T29), while the other tests still get memory. Jobs nest on Windows 8 and
+#     later, so testsuite/timeout (timeout.exe puts its child in a job of its own, with no breakaway) keeps working
+#     and the cap still applies to the process inside it. A process that hits the cap is logged to state.txt
+#     ("memory-cap:" line: time, pid, name, private commit) from the job's completion port, and the largest commit of
+#     any process in the run (the job's PeakProcessMemoryUsed) is logged with every free-space line and at the end.
+#     The job does not kill its processes when the runner exits, and the cap never applies to the runner itself.
+#     Default 4096 MB (T34, from measurements on acrylic): the largest commit of any process in 48 of the
+#     heaviest perf/allocation tests was 1.37 GB, and concprog001(threaded2) (fragile, "can diverge") commits 1.7 to
+#     2.5 GB when it passes, so the cap has to stay above 2.5 GB; one diverging run reached the 13.6 GB that took
+#     down a T29 run, and now stops at 4 GB. Three tests run at once, so three runaways at most hold 12 GB of the
+#     host's 20 GB commit limit. A test that really needs more than the cap needs -ProcessMemoryMB raised.
+#   - Fresh metrics file. If logs\perf-metrics.tsv exists at the start (the driver appends to it) it is moved to
+#     perf-metrics-<UTC last-write stamp>.tsv in the same directory, and the move is logged (a file with no rows,
+#     what a run without perf tests leaves, is just removed).
+#   - Per-test timestamps. The driver prints a start line `=====> <test>(<way>) <n> of <N> [...]` for every test case
+#     at -v3 (make's VERBOSE=3; at the default it prints one line in a hundred) and `*** unexpected failure for ...`
+#     style lines when a test ends badly. It does not time-stamp them, and its stdout is block-buffered when
+#     redirected, so the runner passes `-e sys.stdout.reconfigure(line_buffering=True)` (a driver option, through
+#     EXTRA_RUNTEST_OPTS; only the driver's own output is line-buffered, not the tests' python children) and a
+#     background thread of the job helper polls testsuite.log every 250 ms and appends `<UTC time>\t<line>` for
+#     those marker lines (=====>, ***, Wrong exit code, Timeout happened) to logs\timeline.tsv. The log itself is
+#     unchanged (it is only longer at -v3: every command line is echoed). Start time = the stamp of the `=====>` line
+#     (+- 0.25 s); end time = start + the junit time, or the stamp of the `***` line for a failure. -NoTimeline
+#     turns it off (default verbosity, no thread).
+#   - The make command now lives in logs\run-make.sh (run with bash -l), not in a -lc string, so that the double
+#     quotes of the -e option need no extra quoting layer.
+#
 # Exit code: make's exit code if it ran; otherwise 10 refused (low disk at
 # start), 11 aborted (low disk during the run), 12 commit mismatch, 13 other
 # error.
@@ -90,7 +123,9 @@ param(
     [string] $Ghc = '',                          # ghc.exe to test; default: the only install\ghc-* dir
     [double] $MinFreeGB = 15,
     [double] $AbortFreeGB = 5,
-    [int] $LogEveryMinutes = 10
+    [int] $LogEveryMinutes = 10,
+    [int] $ProcessMemoryMB = 4096,               # per-process commit cap (job object); 0 = no cap
+    [switch] $NoTimeline                         # no -v3, no timeline.tsv
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -139,12 +174,213 @@ function SweepStragglers {
     }
 }
 
+# The make child's job object (per-process commit cap, peak accounting, cap events) and the timeline tail thread; see the header.
+Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
+
+public sealed class RunnerJob : IDisposable
+{
+    const uint JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x100;
+    const int JobObjectAssociateCompletionPortInformation = 7;
+    const int JobObjectExtendedLimitInformation = 9;
+    const uint JOB_OBJECT_MSG_PROCESS_MEMORY_LIMIT = 9;
+    const uint CREATE_SUSPENDED = 0x4, CREATE_UNICODE_ENVIRONMENT = 0x400, CREATE_NO_WINDOW = 0x08000000;
+    static readonly UIntPtr PortKey = new UIntPtr(1), StopKey = new UIntPtr(2);
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct BASIC_LIMIT { public long PerProcessUserTimeLimit, PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass, SchedulingClass; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct IO_COUNTERS { public ulong a, b, c, d, e, f; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct EXT_LIMIT { public BASIC_LIMIT Basic; public IO_COUNTERS Io; public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct ASSOC_PORT { public UIntPtr CompletionKey; public IntPtr CompletionPort; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct STARTUPINFO { public uint cb; public IntPtr lpReserved, lpDesktop, lpTitle; public uint dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags; public ushort wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError; }
+    [StructLayout(LayoutKind.Sequential)]
+    struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public uint dwProcessId, dwThreadId; }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern IntPtr CreateJobObjectW(IntPtr attrs, string name);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int cls, ref EXT_LIMIT info, int len);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetInformationJobObject(IntPtr job, int cls, ref ASSOC_PORT info, int len);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool QueryInformationJobObject(IntPtr job, int cls, out EXT_LIMIT info, int len, IntPtr ret);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool AssignProcessToJobObject(IntPtr job, IntPtr proc);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateJobObject(IntPtr job, uint code);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateIoCompletionPort(IntPtr file, IntPtr existing, UIntPtr key, uint threads);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetQueuedCompletionStatus(IntPtr port, out uint bytes, out UIntPtr key, out IntPtr overlapped, uint ms);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool PostQueuedCompletionStatus(IntPtr port, uint bytes, UIntPtr key, IntPtr overlapped);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern bool CreateProcessW(string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr env, string cwd, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern uint ResumeThread(IntPtr thread);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern uint WaitForSingleObject(IntPtr h, uint ms);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetExitCodeProcess(IntPtr proc, out uint code);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr proc, uint code);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll")] static extern uint GetConsoleCP();
+
+    readonly IntPtr job, port;
+    readonly long limitBytes;
+    readonly string logPath, timelinePath;
+    IntPtr proc = IntPtr.Zero;
+    Thread portThread, tailThread;
+    readonly ManualResetEvent stopTail = new ManualResetEvent(false);
+    readonly ConcurrentQueue<string> events = new ConcurrentQueue<string>();
+    readonly HashSet<uint> seen = new HashSet<uint>();
+    long timelineLines;
+    bool disposed;
+
+    public int Pid { get; private set; }
+    public long LimitBytes { get { return limitBytes; } }
+    public long TimelineLines { get { return Interlocked.Read(ref timelineLines); } }
+
+    // limitMB 0: no per-process limit (the job is then only used for accounting). timelinePath null: no tail thread.
+    public RunnerJob(long limitMB, string logPath, string timelinePath)
+    {
+        limitBytes = limitMB * 1024L * 1024L;
+        this.logPath = logPath; this.timelinePath = string.IsNullOrEmpty(timelinePath) ? null : timelinePath;
+        job = CreateJobObjectW(IntPtr.Zero, null);
+        if (job == IntPtr.Zero) throw new InvalidOperationException("CreateJobObject failed: " + Marshal.GetLastWin32Error());
+        EXT_LIMIT ext = new EXT_LIMIT();
+        if (limitBytes > 0)
+        {
+            ext.Basic.LimitFlags = JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            ext.ProcessMemoryLimit = new UIntPtr((ulong)limitBytes);
+        }
+        if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, ref ext, Marshal.SizeOf(typeof(EXT_LIMIT))))
+            throw new InvalidOperationException("SetInformationJobObject(limits) failed: " + Marshal.GetLastWin32Error());
+        port = CreateIoCompletionPort(new IntPtr(-1), IntPtr.Zero, UIntPtr.Zero, 1);
+        if (port == IntPtr.Zero) throw new InvalidOperationException("CreateIoCompletionPort failed: " + Marshal.GetLastWin32Error());
+        ASSOC_PORT ap = new ASSOC_PORT(); ap.CompletionKey = PortKey; ap.CompletionPort = port;
+        if (!SetInformationJobObject(job, JobObjectAssociateCompletionPortInformation, ref ap, Marshal.SizeOf(typeof(ASSOC_PORT))))
+            throw new InvalidOperationException("SetInformationJobObject(port) failed: " + Marshal.GetLastWin32Error());
+        portThread = new Thread(PortLoop); portThread.IsBackground = true; portThread.Start();
+    }
+
+    // Starts the command line suspended, puts the process in the job, resumes it. The child inherits the caller's
+    // console and standard handles and environment, as Start-Process -NoNewWindow does.
+    public int Start(string commandLine, string workDir)
+    {
+        STARTUPINFO si = new STARTUPINFO(); si.cb = (uint)Marshal.SizeOf(typeof(STARTUPINFO));
+        PROCESS_INFORMATION pi;
+        uint flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
+        if (GetConsoleCP() == 0) flags |= CREATE_NO_WINDOW;   // the caller has no console: do not pop one up
+        if (!CreateProcessW(null, new StringBuilder(commandLine), IntPtr.Zero, IntPtr.Zero, true, flags, IntPtr.Zero, workDir, ref si, out pi))
+            throw new InvalidOperationException("CreateProcess failed: " + Marshal.GetLastWin32Error());
+        proc = pi.hProcess; Pid = (int)pi.dwProcessId;
+        if (!AssignProcessToJobObject(job, proc))
+        {
+            int err = Marshal.GetLastWin32Error();
+            TerminateProcess(proc, 1); CloseHandle(pi.hThread);
+            throw new InvalidOperationException("AssignProcessToJobObject failed: " + err);
+        }
+        if (timelinePath != null) { tailThread = new Thread(TailLoop); tailThread.IsBackground = true; tailThread.Start(); }
+        ResumeThread(pi.hThread);
+        CloseHandle(pi.hThread);
+        return Pid;
+    }
+
+    public bool WaitForExit(int ms) { return WaitForSingleObject(proc, (uint)ms) == 0; }
+    public int ExitCode { get { uint c; if (!GetExitCodeProcess(proc, out c)) return -1; return unchecked((int)c); } }
+    public void Kill() { TerminateJobObject(job, 1); }
+
+    public long PeakProcessBytes
+    {
+        get { EXT_LIMIT e; if (!QueryInformationJobObject(job, JobObjectExtendedLimitInformation, out e, Marshal.SizeOf(typeof(EXT_LIMIT)), IntPtr.Zero)) return -1; return (long)(ulong)e.PeakProcessMemoryUsed; }
+    }
+
+    public string[] DrainEvents() { List<string> l = new List<string>(); string s; while (events.TryDequeue(out s)) l.Add(s); return l.ToArray(); }
+
+    static string Now() { return DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'"); }
+
+    void PortLoop()
+    {
+        while (true)
+        {
+            uint msg; UIntPtr key; IntPtr ov;
+            if (!GetQueuedCompletionStatus(port, out msg, out key, out ov, 0xFFFFFFFF)) { if (ov == IntPtr.Zero) return; continue; }
+            if (key == StopKey) return;
+            if (msg != JOB_OBJECT_MSG_PROCESS_MEMORY_LIMIT) continue;
+            uint pid = (uint)ov.ToInt64();
+            lock (seen) { if (!seen.Add(pid)) continue; if (seen.Count > 500) continue; }
+            string what = "";
+            try
+            {
+                using (Process p = Process.GetProcessById((int)pid))
+                    what = " " + p.ProcessName + ", private commit now " + (p.PrivateMemorySize64 >> 20) + " MB";
+            }
+            catch (Exception) { what = " (already gone)"; }
+            events.Enqueue(Now() + " process hit the per-process commit limit of " + (limitBytes >> 20) + " MB: pid " + pid + what);
+        }
+    }
+
+    static readonly string[] Markers = { "=====> ", "*** ", "Wrong exit code", "Timeout happened" };
+
+    void TailLoop()
+    {
+        long off = 0; string pending = "";
+        using (StreamWriter w = new StreamWriter(new FileStream(timelinePath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete), new UTF8Encoding(false)))
+        {
+            bool last = false;
+            while (true)
+            {
+                bool stop = stopTail.WaitOne(250);
+                try
+                {
+                    using (FileStream fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    {
+                        if (fs.Length < off) { off = 0; pending = ""; }
+                        fs.Seek(off, SeekOrigin.Begin);
+                        byte[] buf = new byte[1 << 20]; int n; string now = Now();
+                        while ((n = fs.Read(buf, 0, buf.Length)) > 0)
+                        {
+                            off += n;
+                            pending += Encoding.Latin1.GetString(buf, 0, n);
+                            int nl;
+                            while ((nl = pending.IndexOf('\n')) >= 0)
+                            {
+                                string line = pending.Substring(0, nl).TrimEnd('\r'); pending = pending.Substring(nl + 1);
+                                foreach (string m in Markers)
+                                    if (line.StartsWith(m, StringComparison.Ordinal)) { w.Write(now); w.Write('\t'); w.WriteLine(line); Interlocked.Increment(ref timelineLines); break; }
+                            }
+                        }
+                    }
+                    w.Flush();
+                }
+                catch (IOException) { }
+                catch (UnauthorizedAccessException) { }
+                if (last) return;
+                last = stop;   // one more pass after the stop request, to pick up the end of the log
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (disposed) return; disposed = true;
+        stopTail.Set();
+        if (tailThread != null) tailThread.Join(10000);
+        PostQueuedCompletionStatus(port, 0, StopKey, IntPtr.Zero);
+        portThread.Join(5000);
+        if (proc != IntPtr.Zero) CloseHandle(proc);
+        CloseHandle(port);
+        CloseHandle(job);
+    }
+}
+'@
+
 $reason = ''        # set when the run ends for a reason other than an unexpected exception
 $exitCode = 13
 $runTmp = ''
 $aborted = $false
+$job = $null
 try {
-    State "started: Work=$Work Msys2=$Msys2 Speed=$Speed Threads=$Threads Only='$Only' NoExtract=$NoExtract Tools='$Tools' ExpectTree='$ExpectTree' ExpectGhc='$ExpectGhc'"
+    State "started: Work=$Work Msys2=$Msys2 Speed=$Speed Threads=$Threads Only='$Only' NoExtract=$NoExtract Tools='$Tools' ExpectTree='$ExpectTree' ExpectGhc='$ExpectGhc' ProcessMemoryMB=$ProcessMemoryMB NoTimeline=$NoTimeline"
 
     # NoDefaultCurrentDirectoryInExePath=1 (an agent harness sets it in its own process environment; a user's shell does not)
     # makes cmd.exe skip the current directory when it looks for a program, which breaks tests that run a bare program name
@@ -277,56 +513,96 @@ printf 'python3-version=%s\n' "$(python3 -c 'import sys; print(sys.version.split
     if ($chkRc -ne 0 -or -not $chkMap['python3-version']) { $reason = "python3 does not run in the test shell (exit $chkRc): $($chkOut -join ' | ')"; $exitCode = 13; throw $reason }
     $only = if ($Only) { "TEST='$Only'" } else { '' }
     $mt = MsysPath $runTmp
+
+    # --- fresh perf metrics file: the driver appends to METRICS_FILE, so keep an earlier run's file aside (T34)
+    $metrics = Join-Path $logs 'perf-metrics.tsv'
+    if ((Test-Path $metrics) -and -not (Select-String -Path $metrics -Pattern '\S' -Quiet)) {
+        # a run with no perf test leaves a file with no rows: nothing to keep
+        Remove-Item $metrics
+        State "metrics: an earlier perf-metrics.tsv had no rows and was removed; this run starts a fresh $metrics" | Out-Null
+    } elseif (Test-Path $metrics) {
+        $old = Get-Item $metrics
+        $oldRows = @(Get-Content $metrics | Where-Object { $_.Trim() }).Count
+        $aside = Join-Path $logs ('perf-metrics-' + $old.LastWriteTimeUtc.ToString('yyyyMMddTHHmmssZ') + '.tsv')
+        for ($i = 1; Test-Path $aside; $i++) { $aside = Join-Path $logs ('perf-metrics-' + $old.LastWriteTimeUtc.ToString('yyyyMMddTHHmmssZ') + "-$i.tsv") }
+        Move-Item $metrics $aside
+        State "metrics: an earlier perf-metrics.tsv ($oldRows rows, $($old.Length) bytes, last written $($old.LastWriteTimeUtc.ToString('u'))) was moved to $aside; this run starts a fresh $metrics" | Out-Null
+    } else {
+        State "metrics: no earlier perf-metrics.tsv; this run starts a fresh $metrics" | Out-Null
+    }
     # tests/linters/Makefile does not include boilerplate.mk, so it only sees CHANGELOG_D when hadrian passes it;
     # do the same when the tools are there. (The other tools get their default from boilerplate.mk.)
     $changelogD = Join-Path $root 'inplace\bin\changelog-d.exe'
     $toolVars = if ($Tools -and (Test-Path $changelogD)) { "CHANGELOG_D='$(MsysPath $changelogD)' " } else { '' }
     # /etc/profile resets TMP and TEMP to /tmp, so export them again after login.
     # TEST_HC is also exported, as Hadrian does (hadrian/src/Rules/Test.hs); some tests read it from the environment (T18382).
+    # Per-test timestamps (see the header): -v3 makes the driver print a start line for every test case, and its own
+    # stdout is made line-buffered (not the python children's) so the lines reach the log when they are printed.
+    $runOpts = $extraOpts
+    $verbose = ''
+    if (-not $NoTimeline) {
+        $runOpts += ' -e "sys.stdout.reconfigure(line_buffering=True)"'
+        $verbose = 'VERBOSE=3 '
+    }
     $cmd = "export TMP='$mt' TEMP='$mt' TMPDIR='$mt' TEST_HC='$(MsysPath $ghc)'; " +
            "make -C testsuite/tests test TEST_HC='$(MsysPath $ghc)' PYTHON='$(MsysPath $Python)' " +
            "THREADS=$Threads SPEED=$Speed SUMMARY_FILE='$(MsysPath (Join-Path $logs 'summary.txt'))' " +
            "JUNIT_FILE='$(MsysPath (Join-Path $logs 'junit.xml'))' " +
-           "METRICS_FILE='$(MsysPath (Join-Path $logs 'perf-metrics.tsv'))' " +
-           "EXTRA_RUNTEST_OPTS='$extraOpts' $toolVars$only"
+           "METRICS_FILE='$(MsysPath $metrics)' " +
+           "EXTRA_RUNTEST_OPTS='$runOpts' $verbose$toolVars$only"
     State "env: TEST_HC=$(MsysPath $ghc) exported to the make child (msys form, as passed to make)" | Out-Null
     State "running: $cmd" | Out-Null
+    # The command goes in a script, run by a login shell like shell-check.sh above (no quoting layer for the -e option).
+    $runMake = Join-Path $logs 'run-make.sh'
+    [IO.File]::WriteAllText($runMake, $cmd + "`n")
 
-    # cmd.exe merges stdout and stderr into the log; taskkill /T takes the whole tree.
+    # cmd.exe merges stdout and stderr into the log; taskkill /T takes the whole tree. The make child is started
+    # inside the job object (see the header): -ProcessMemoryMB per process, 0 = no cap.
+    if ($ProcessMemoryMB -ne 0 -and $ProcessMemoryMB -lt 512) { throw "-ProcessMemoryMB must be 0 (no cap) or at least 512, got $ProcessMemoryMB" }
     $log = Join-Path $logs 'testsuite.log'
-    $cmdline = "/s /c `"`"$bash`" -lc `"$cmd`" > `"$log`" 2>&1`""
-    $p = Start-Process -FilePath $cmdExe -ArgumentList $cmdline `
-         -WorkingDirectory $root -NoNewWindow -PassThru
-    $null = $p.Handle    # keep the handle so ExitCode is available after exit
+    $timeline = Join-Path $logs 'timeline.tsv'
+    $cmdline = "`"$cmdExe`" /s /c `"`"$bash`" -l `"$(MsysPath $runMake)`" > `"$log`" 2>&1`""
+    $job = New-Object RunnerJob -ArgumentList $ProcessMemoryMB, $log, $(if ($NoTimeline) { $null } else { $timeline })
+    State "job: make child in a job object with a per-process commit limit of $(if ($ProcessMemoryMB) { "$ProcessMemoryMB MB (JOB_OBJECT_LIMIT_PROCESS_MEMORY)" } else { 'none (accounting only)' }); timeline: $(if ($NoTimeline) { 'off' } else { "$timeline (VERBOSE=3, polled every 250 ms)" })" | Out-Null
+    $procId = $job.Start($cmdline, $root)
     $tests = Join-Path $root 'testsuite\tests'
     $every = [TimeSpan]::FromMinutes($LogEveryMinutes)
     $next = Get-Date
-    while (-not $p.WaitForExit(15000)) {
+    while (-not $job.WaitForExit(15000)) {
+        foreach ($e in $job.DrainEvents()) { State "memory-cap: $e" | Out-Null }
         $free = FreeGB
         if ($free -lt $AbortFreeGB) {
             $aborted = $true
             $reason = "aborted: $free GB free on $($drive.Name), below $AbortFreeGB GB (latest test: $(LatestTest $tests))"
             $exitCode = 11
-            State "free-space: $free GB; $reason; killing process tree $($p.Id)" | Out-Null
-            KillTree $p.Id
+            State "free-space: $free GB; $reason; killing process tree $procId" | Out-Null
+            KillTree $procId
+            $job.Kill()
             break
         }
         if ((Get-Date) -ge $next) {
-            State "free-space: $free GB on $($drive.Name); latest test: $(LatestTest $tests)" | Out-Null
+            State "free-space: $free GB on $($drive.Name); latest test: $(LatestTest $tests); peak commit of any process so far: $([math]::Round($job.PeakProcessBytes / 1MB)) MB" | Out-Null
             $next = (Get-Date) + $every
         }
     }
+    foreach ($e in $job.DrainEvents()) { State "memory-cap: $e" | Out-Null }
     if (-not $aborted) {
-        $code = $p.ExitCode
+        $code = $job.ExitCode
         $reason = "make exit $code"
         $exitCode = $code
     }
+    State "job: peak commit of any single process in the run: $([math]::Round($job.PeakProcessBytes / 1MB)) MB (limit $(if ($ProcessMemoryMB) { "$ProcessMemoryMB MB" } else { 'none' }))" | Out-Null
     State "free-space: $(FreeGB) GB on $($drive.Name) after the run; $Msys2\tmp has $(MsysGhcTmpCount) ghc*_tmp_* dirs (before: $msysTmpBefore)" | Out-Null
 } catch {
     if (-not $reason) { $reason = "error: $($_.Exception.Message)"; $exitCode = 13 }
 } finally {
     try {
         if ($aborted) { SweepStragglers }
+        if ($job) {
+            foreach ($e in $job.DrainEvents()) { State "memory-cap: $e" | Out-Null }
+            $job.Dispose()   # stops the timeline thread after a last pass over the log
+            if (-not $NoTimeline) { State "timeline: $($job.TimelineLines) marker lines in $(Join-Path $logs 'timeline.tsv')" | Out-Null }
+        }
         if ($runTmp -and (Test-Path $runTmp)) {
             $leaked = @(Get-ChildItem $runTmp -Force -ErrorAction SilentlyContinue).Count
             # A program still running from the temp dir (GHC's temp executables) keeps it locked: stop it, then retry.
