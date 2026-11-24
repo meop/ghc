@@ -261,7 +261,11 @@ splitAtProcPoints platform entry_label callPPs procPoints procMap cmmProc = do
   let liveness = cmmGlobalLiveness platform g
   let ppLiveness pp = filter (isArgReg . globalRegUse_reg) $ regSetToList $
                         expectJust $ mapLookup pp liveness
-  graphEnv <- return $ foldlGraphBlocks add_block mapEmpty g
+  -- Only the blocks that we can reach from the entry: a proc point can be
+  -- unreachable, when the code layout has removed the call that returns to
+  -- it (a stack check that cannot fail, see Note [Always false stack
+  -- check] in GHC.Cmm.LayoutStack). It must not get a proc of its own.
+  graphEnv <- return $ foldl' add_block mapEmpty (revPostorder g)
 
   -- Build a map from proc point BlockId to pairs of:
   --  * Labels for their new procedures
