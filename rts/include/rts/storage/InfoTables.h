@@ -26,9 +26,22 @@
    Somewhere between binutils-2.16.1 and binutils-2.16.91.0.6,
    support for 64-bit PC-relative relocations was added, so maybe this
    hackery can go away sometime.
+
+   The same applies to AArch64 on Windows (aarch64_HOST_ARCH with
+   mingw32_HOST_OS).  COFF has no 64-bit relative relocation on ARM64
+   either: the only PC-relative data relocation is IMAGE_REL_ARM64_REL32,
+   and lld patches just the low 32 bits of the field.  For a field written
+   as an 8-byte `.quad lbl-info` whose label is in another section (con_desc
+   and the large bitmaps in .rdata), the assembler leaves the sign-extended
+   addend in the upper 32 bits, so reading the field as a 64-bit value
+   gives garbage.  The offsets always fit in 32 bits, so read only the low
+   half, as on x86_64.  ELF and Mach-O have 64-bit relative relocations
+   (R_AARCH64_PREL64, SUBTRACTOR pairs), so other AArch64 targets keep
+   full-word fields.  The field is still 8 bytes wide, so the layout of the
+   info tables does not change.
    ------------------------------------------------------------------------- */
 
-#if defined(x86_64_HOST_ARCH)
+#if defined(x86_64_HOST_ARCH) || (defined(aarch64_HOST_ARCH) && defined(mingw32_HOST_OS))
 #define OFFSET_FIELD(n) StgHalfInt n; StgHalfWord __pad_##n
 #else
 #define OFFSET_FIELD(n) StgInt n
