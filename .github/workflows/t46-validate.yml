@@ -94,6 +94,14 @@ jobs:
           retention-days: 2
           compression-level: 0
           if-no-files-found: warn
+      # The test job's haddock perf tests read these (GitLab passes them as a job artifact).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: haddock-timing-${{ matrix.name }}
+          path: _build/stage1/haddock-timing-files
+          retention-days: 2
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -157,6 +165,10 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: bindist-${{ matrix.name }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: haddock-timing-${{ matrix.name }}
+          path: _build/stage1/haddock-timing-files
       - name: Test in the CI image
         run: |
           ls -l "$BIN_DIST_NAME.tar.xz"
