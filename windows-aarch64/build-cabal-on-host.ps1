@@ -100,39 +100,76 @@ Check "cabal get cabal-install-$BuildVersion" {
     try { Invoke-Logged 'cabal-get' $x64Cabal @('get', "cabal-install-$BuildVersion") | Out-Null } finally { Pop-Location }
     tar -xzf $Hsc2hsArchive -C (Join-Path $project 'hsc2hs')
     if ($LASTEXITCODE -ne 0) { throw "tar failed: $LASTEXITCODE" }
-    # Unpack and patch every stored package, then use only those the solver
-    # actually picks: a patched copy is a local package, which would force its
-    # version (e.g. hadolint's Cabal 3.12 patch must not reach this build).
-    $candidates = @()
-    foreach ($patch in Get-ChildItem $PatchesDir -Filter '*.patch') {
-        $pkg = $patch.BaseName
-        Push-Location $project
-        try { Invoke-Logged "cabal-get-$pkg" $x64Cabal @('get', $pkg) | Out-Null } finally { Pop-Location }
-        Push-Location (Join-Path $project $pkg)
-        try { Invoke-Logged "patch-$pkg" 'git' @('apply', '-p1', $patch.FullName) | Out-Null } finally { Pop-Location }
-        $candidates += $pkg
-    }
-    function Write-Project([string[]] $patchedDirs) {
+    function Write-Project([string[]] $patchedDirs, [string[]] $extraConstraints) {
         @(
             "packages: cabal-install-$BuildVersion/ hsc2hs/ $(($patchedDirs | ForEach-Object { "$_/" }) -join ' ')"
             "allow-newer: $AllowNewer"
             # tar 0.6 uses OsPath quasiquotes (0.6.4 also via directory-ospath-streaming);
             # quasiquotes need Template Haskell, which needs the RTS linker (milestone 3).
             'constraints: tar < 0.6'
+            $extraConstraints
             'package hashable'
             '  ghc-options: -package ghc-bignum'
         ) | Set-Content -Encoding utf8 (Join-Path $project 'cabal.project')
     }
-    Write-Project @()
+    Write-Project @() @()
     Push-Location $project
     try {
         Invoke-Logged 'plan' $x64Cabal @('build', 'exe:cabal', '--dry-run', "--with-compiler=$Ghc") | Out-Null
         $plan = Get-Content (Join-Path $project 'dist-newstyle\cache\plan.json') -Raw | ConvertFrom-Json
     } finally { Pop-Location }
-    $inPlan = $plan.'install-plan' | ForEach-Object { "$($_.'pkg-name')-$($_.'pkg-version')" } | Sort-Object -Unique
-    $patched = @($candidates | Where-Object { $_ -in $inPlan })
-    Write-Project $patched
-    "patched (in the plan): $(if ($patched) { $patched -join ', ' } else { 'none' }); not needed: $(@($candidates | Where-Object { $_ -notin $patched }) -join ', ')"
+    $inPlan = @{}
+    $plan.'install-plan' | ForEach-Object { $inPlan[$_.'pkg-name'] = $_.'pkg-version' }
+
+    # Stored patches are per exact version (<name>-<version>.patch). A patch
+    # only reaches this build if the solver can actually pick its version:
+    # cabal-install needs a current Cabal, so the Cabal 3.12 patch that
+    # hadolint's build uses must not be forced in here, while network's
+    # bounds still admit 3.2.9. Probe each patch with a version constraint
+    # on its own, keep the ones that solve, and apply only those.
+    $patched = @()
+    $patchConstraints = @()
+    foreach ($patch in Get-ChildItem $PatchesDir -Filter '*.patch') {
+        if ($patch.BaseName -notmatch '^(.+)-([0-9][0-9.]*)$') {
+            "patched: $($patch.Name) does not name a version; skipped"
+            continue
+        }
+        $name = $Matches[1]; $ver = $Matches[2]
+        if (-not $inPlan.ContainsKey($name)) {
+            "patched: $name is not in the plan; skipped"
+            continue
+        }
+        if ($inPlan[$name] -eq $ver) {
+            "patched: $name-$ver already the plan's pick"
+        } else {
+            Push-Location $project
+            try {
+                try {
+                    Invoke-Logged "probe-$name-$ver" $x64Cabal @(
+                        'build', 'exe:cabal', '--dry-run', "--with-compiler=$Ghc",
+                        "--constraint=$name==$ver"
+                    ) | Out-Null
+                } catch {
+                    "patched: solver cannot pick $name-$ver for this build; skipped"
+                    continue
+                }
+                $probe = Get-Content (Join-Path $project 'dist-newstyle\cache\plan.json') -Raw | ConvertFrom-Json
+            } finally { Pop-Location }
+            $picked = @($probe.'install-plan' | Where-Object { $_.'pkg-name' -eq $name })[0].'pkg-version'
+            if ($picked -ne $ver) {
+                "patched: solver needs $name-$picked, patch is for $ver; skipped"
+                continue
+            }
+        }
+        $patchConstraints += "constraints: $name ==$ver"
+        Push-Location $project
+        try { Invoke-Logged "cabal-get-$name-$ver" $x64Cabal @('get', "$name-$ver") | Out-Null } finally { Pop-Location }
+        Push-Location (Join-Path $project "$name-$ver")
+        try { Invoke-Logged "patch-$name-$ver" 'git' @('apply', '-p1', $patch.FullName) | Out-Null } finally { Pop-Location }
+        $patched += "$name-$ver"
+    }
+    Write-Project $patched $patchConstraints
+    "patched (in the plan): $(if ($patched) { $patched -join ', ' } else { 'none' })"
 }
 
 function Build-Cabal([string] $log, [string] $cabal, [string] $installDir) {
