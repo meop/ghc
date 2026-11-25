@@ -30,7 +30,7 @@ result.
 
 | Option | Build | Test on real Windows AArch64 | Notes |
 | --- | --- | --- | --- |
-| Local x86_64 Linux | Hours of local CPU | Manual: copy the bindist to a Windows AArch64 machine | Simplest to start, and gives a measured build time. |
+| Local x86_64 Linux | Hours of local CPU | Manual: copy the bindist to a Windows AArch64 machine and run `test-on-host.ps1` there ([README.md](README.md)) | Simplest to start, and gives a measured build time. |
 | GitHub Actions on a fork of the `ghc/ghc` GitHub mirror | `ubuntu-24.04` or `ubuntu-24.04-arm` runner: 4 cores, 16 GB, free for public repositories, 6-hour job limit | Yes: a follow-on `windows-11-arm` job runs the bindist checks automatically | A `quick` stage 2 build should fit in 6 hours; if not, split it across jobs with caching. Merge requests still go to GitLab. |
 | GitLab CI on gitlab.haskell.org | GHC's own runners | Under Wine only | Fork pipelines normally get no runners; a pipeline runs only for a merge request against `ghc/ghc`. |
 

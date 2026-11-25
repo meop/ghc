@@ -1,7 +1,7 @@
 # Runs on the Windows AArch64 host. Reproduces GHC exiting with code 11 and
 # no output while building directory-ospath-streaming-0.3 (a cabal-install
 # dependency), outside cabal so all output is visible, then varies the flags.
-# Needs the store that build-cabal-on-host.sh filled (for atomic-counter).
+# Needs the store that build-cabal-on-host.ps1 filled (for atomic-counter).
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $root = Join-Path $env:LOCALAPPDATA 'ghc-windows-aarch64-test'

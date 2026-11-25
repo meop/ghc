@@ -1,4 +1,4 @@
-# Runs on a Windows host (copied there by install-msys2-on-host.sh). Installs
+# Runs on a Windows host, started from its own shell. Installs
 # MSYS2 for this work at $Root (e.g. V:\msys2\ghc), from a pinned base archive,
 # then refreshes the package databases and installs only the packages GHC's
 # build and testsuite need. No `pacman -Syu`: the rest of the base stays at
