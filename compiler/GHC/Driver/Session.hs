@@ -3820,14 +3820,6 @@ makeDynFlagsConsistent dflags
  , Nothing <- outputFile dflags
     = pgmError "--output must be specified when using --merge-objs"
 
- | platformTablesNextToCode platform
-   && os == OSMinGW32
-   && arch == ArchAArch64
-    = case backendCodeOutput (backend dflags) of
-        Just LlvmCodeOutput -> pgmError "-fllvm is incompatible with enabled TablesNextToCode at Windows Aarch64"
-        Just NcgCodeOutput -> pgmError "-fasm is incompatible with enabled TablesNextToCode at Windows Aarch64"
-        _ -> (dflags, mempty, mempty)
-
   -- When we do ghci, force using dyn ways if the target RTS linker
   -- only supports dynamic code
  | LinkInMemory <- ghcLink dflags
