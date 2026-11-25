@@ -47,7 +47,11 @@ fi
 # commit on another day changes the version and forces a full rebuild.
 base=$(git merge-base HEAD origin/master 2>/dev/null || git merge-base HEAD master)
 date -u -d "@$(git log -1 --format=%ct "$base")" +%Y%m%d > VERSION_DATE
-grep -qx '/VERSION_DATE' .git/info/exclude 2>/dev/null || echo '/VERSION_DATE' >> "$(git rev-parse --git-dir)/info/exclude"
+# git reads info/exclude only from the common dir, also in a worktree (where .git is a file and the per-worktree
+# git dir has no info/).
+exclude="$(git rev-parse --git-common-dir)/info/exclude"
+mkdir -p "$(dirname "$exclude")"
+grep -qx '/VERSION_DATE' "$exclude" 2>/dev/null || echo '/VERSION_DATE' >> "$exclude"
 echo "VERSION_DATE $(cat VERSION_DATE) (from $(git log -1 --format='%h %cs' "$base"))"
 
 if [[ "${RESUME:-}" != 1 ]]; then
