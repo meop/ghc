@@ -807,3 +807,9 @@ test('T27376',
        only_ways(['nonmoving_thr', 'nonmoving_thr_sanity']),
        extra_run_opts('+RTS -A2m -RTS') ],
      compile_and_run, ['-O2'])
+
+# A function of more than 64 pointer arguments has a large bitmap, which a
+# tables-next-to-code info table reaches through a 64-bit offset field. On
+# Windows AArch64 only the low 32 bits of that field are relocated.
+# See Note [x86-64-relative] in rts/include/rts/storage/InfoTables.h.
+test('papLargeBitmap', [js_skip], compile_and_run, ['-with-rtsopts=-A32k'])
