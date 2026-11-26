@@ -208,8 +208,26 @@ genPlatformConstantsHeader context file = do
         [ prefix -/- "ghcplatform.h"
         , prefix -/- "ghcautoconf.h"
         ]
+    -- The program deriveConstants compiles #includes Rts.h, StableName.h and
+    -- Capability.h, and measures the structures they declare (see getWanted
+    -- in utils/deriveConstants/Main.hs), so this header is out of date when
+    -- any of the headers they include changes. We track every RTS header on
+    -- the include path (-Irts, -Irts/include) rather than the exact closure,
+    -- which varies with the target and would silently go stale. If no
+    -- constant moved, the regenerated header has the same digest and nothing
+    -- generated from it is rebuilt.
+    need =<< getDirectoryFiles "." deriveConstantsHeaderPatterns
     withTempDir $ \tmpdir -> build $
         target context DeriveConstants [] [file, tmpdir]
+
+-- | The RTS headers that deriveConstants may read: the public ones, and the
+-- private ones that Capability.h and StableName.h pull in (rts/*.h, rts/sm/*.h).
+deriveConstantsHeaderPatterns :: [FilePattern]
+deriveConstantsHeaderPatterns =
+    [ "rts/include/**/*.h"
+    , "rts/*.h"
+    , "rts/sm/*.h"
+    ]
 
 copyRules :: Rules ()
 copyRules = do
