@@ -140,23 +140,14 @@ basename f = go f f
 --    does not exist.
 
 getEnv :: String -> IO String
-getEnv name = lookupEnv name >>= maybe handleError return
-  where
-#if defined(mingw32_HOST_OS)
-    handleError = do
-        err <- c_GetLastError
-        if err == eRROR_ENVVAR_NOT_FOUND
-            then ioe_missingEnvVar name
-            else throwGetLastError "getEnv"
+getEnv name = lookupEnv name >>= maybe (ioe_missingEnvVar name) return
 
+#if defined(mingw32_HOST_OS)
 eRROR_ENVVAR_NOT_FOUND :: DWORD
 eRROR_ENVVAR_NOT_FOUND = 203
 
 foreign import ccall unsafe "windows.h GetLastError"
   c_GetLastError:: IO DWORD
-
-#else
-    handleError = ioe_missingEnvVar name
 #endif
 
 -- | Return the value of the environment variable @var@, or @Nothing@ if
@@ -167,12 +158,24 @@ foreign import ccall unsafe "windows.h GetLastError"
 -- @since base-4.6.0.0
 lookupEnv :: String -> IO (Maybe String)
 #if defined(mingw32_HOST_OS)
-lookupEnv name = withCWString name $ \s -> try_size s 256
+lookupEnv name = withCWString name query
   where
+    -- GetEnvironmentVariableW returns 0 both for a variable that is not set and
+    -- for one that is set to the empty string, and only the last error tells
+    -- the two apart. Avoid that: with no buffer it returns the size that is
+    -- needed, including the terminating NUL, so 0 means "not set" and 1 means
+    -- "set to the empty string".
+    query s = do
+      size <- c_GetEnvironmentVariable s nullPtr 0
+      case size of
+        0 -> return Nothing
+        1 -> return (Just "")
+        _ -> try_size s size
+
     try_size s size = allocaArray (fromIntegral size) $ \p_value -> do
       res <- c_GetEnvironmentVariable s p_value size
       case res of
-        0 -> return Nothing
+        0 -> query s -- Rare: the variable changed between the calls
         _ | res > size -> try_size s res -- Rare: size increased between calls to GetEnvironmentVariable
           | otherwise  -> peekCWString p_value >>= return . Just
 

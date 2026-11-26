@@ -1,0 +1,25 @@
+-- not set
+Nothing
+Left does-not-exist
+Nothing
+-- set to the empty string
+Just ""
+Right ""
+Just ""
+-- missing, then empty again
+Nothing
+Left does-not-exist
+Nothing
+Just ""
+Right ""
+Just ""
+-- set to a value
+Just "value"
+Right "value"
+Just "value"
+-- set to a value longer than the first buffer
+long value length 1000
+-- unset again
+Nothing
+Left does-not-exist
+Nothing
