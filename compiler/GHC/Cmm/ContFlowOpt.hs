@@ -131,12 +131,54 @@ import Control.Monad
 -- splitting on - we should probably compile them to explicitly use
 -- the native calling convention instead.
 
+-- Note [Shortcut call returns to the entry block]
+-- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+-- When we are splitting proc points (the backend needs it, or tables next to
+-- code is off), every call return is a proc point of its own. It gets an
+-- info table, which is the return address that the callee jumps to, and the
+-- references to the continuation (Sp[0] = L) are replaced with the label of
+-- that info table (see GHC.Cmm.ProcPoint.splitAtProcPoints).
+--
+-- The entry block of a graph is a proc point too, but its label is the
+-- label of the proc. A proc that has no info table (for example a function
+-- written in Cmm) has no info table label for its entry block either. So if
+-- we shortcut a continuation to the entry block of such a proc, as in
+--
+--    bar() {
+--      L1:  if (Sp - 16 < SpLim) then L2 else L3
+--      L2:  Sp[0] = L4; call stg_gc_noregs() returns to L4
+--      L4:  goto L1
+--      L3:  ...
+--    }
+--
+-- (this is what STK_CHK_GEN_N or HP_CHK_GEN produce at the start of a
+-- function), then L1 becomes the continuation: the code stores
+-- (infoTblLbl L1), a label that nothing defines. GNU as accepts the
+-- reference to the undefined local label, and the error only shows up
+-- when linking. LLVM's integrated assembler rejects it
+-- ("assembler label '.LcN_info' can not be undefined", see T9329).
+--
+-- The entry block of the graph may be an empty block that only branches to
+-- L1, as it is in this example when L1 is the label that heapStackCheckGen
+-- puts at the start of the function. We shortcut the entry block to L1 as
+-- well, so L1 is the entry block in the end. We therefore also leave alone
+-- the continuations that would be shortcut to any block that the entry
+-- block can be shortcut to.
+--
+-- So in that case we leave L4 alone. It becomes a proc point of its own,
+-- with an info table, and its code jumps to the entry of the proc. This is
+-- what we get without proc point splitting, too.
+--
+-- If the entry block has an info table, the continuation can use it (the
+-- code is shortcut as before).
+
 cmmCfgOpts :: Bool -> CmmGraph -> CmmGraph
-cmmCfgOpts split g = fst (blockConcat split g)
+cmmCfgOpts split g = fst (blockConcat split False g)
 
 cmmCfgOptsProc :: Bool -> CmmDecl -> CmmDecl
 cmmCfgOptsProc split (CmmProc info lbl live g) = CmmProc info' lbl live g'
-    where (g', env) = blockConcat split g
+    where (g', env) = blockConcat split entry_has_info g
+          entry_has_info = mapMember (g_entry g) (info_tbls info)
           info' = info{ info_tbls = new_info_tbls }
           new_info_tbls = mapFromList (map upd_info (mapToList (info_tbls info)))
 
@@ -153,8 +195,11 @@ cmmCfgOptsProc split (CmmProc info lbl live g) = CmmProc info' lbl live g'
 cmmCfgOptsProc _ top = top
 
 
-blockConcat :: Bool -> CmmGraph -> (CmmGraph, LabelMap BlockId)
-blockConcat splitting_procs g@CmmGraph { g_entry = entry_id }
+-- The first Bool says whether we are splitting proc points, the second
+-- whether the entry block of the graph has an info table. See Note
+-- [Shortcut call returns to the entry block].
+blockConcat :: Bool -> Bool -> CmmGraph -> (CmmGraph, LabelMap BlockId)
+blockConcat splitting_procs entry_has_info g@CmmGraph { g_entry = entry_id }
   = (replaceLabels shortcut_map $ ofBlockMap new_entry new_blocks, shortcut_map')
   where
      -- We might be able to shortcut the entry BlockId itself.
@@ -179,6 +224,21 @@ blockConcat splitting_procs g@CmmGraph { g_entry = entry_id }
      --    it after we process all blocks.
      (new_blocks, shortcut_map, _) =
            foldr maybe_concat (blockmap, mapEmpty, initialBackEdges) blocks
+
+     -- The entry block, and the blocks that it can be shortcut to: those
+     -- that we reach from it by following empty "goto"s. Either of them
+     -- can be the entry block of the result. See Note [Shortcut call
+     -- returns to the entry block].
+     entry_aliases :: LabelSet
+     entry_aliases = go (setSingleton entry_id) entry_id
+       where
+         go seen b
+           | Just blk <- mapLookup b blockmap
+           , Just b'  <- canShortcut blk
+           , not (setMember b' seen)
+           = go (setInsert b' seen) b'
+           | otherwise
+           = seen
 
      -- Map of predecessors for initial graph. We increase number of
      -- predecessors for entry block by one to denote that it is
@@ -217,7 +277,10 @@ blockConcat splitting_procs g@CmmGraph { g_entry = entry_id }
         --       [Shortcut call returns and proc-points]) and
         --   (2) current block is a CmmCall or CmmForeignCall with
         --       continuation b' and
-        --   (3) we can shortcut that continuation to dest
+        --   (3) we can shortcut that continuation to dest, and
+        --   (4) dest is not the entry block of a graph that has no info
+        --       table, or a block that the entry block is shortcut to (see
+        --       Note [Shortcut call returns to the entry block])
         -- Then:
         --   (1) we change continuation to point to b'
         --   (2) create mapping from b' to dest
@@ -230,6 +293,7 @@ blockConcat splitting_procs g@CmmGraph { g_entry = entry_id }
         , Just b'   <- callContinuation_maybe last
         , Just blk' <- mapLookup b' blocks
         , Just dest <- canShortcut blk'
+        , entry_has_info || not (setMember dest entry_aliases)
         = ( mapInsert bid (blockJoinTail head (update_cont dest)) blocks
           , mapInsert b' dest shortcut_map
           , decPreds b' $ incPreds dest backEdges )

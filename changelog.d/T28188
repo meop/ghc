@@ -1,0 +1,5 @@
+section: codegen
+synopsis: Fix an undefined info table label with tables next to code off, when a Cmm
+  procedure's entry block is the retry target of a stack or heap check.
+issues: #28188
+mrs: !17056
