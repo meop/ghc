@@ -1,0 +1,12 @@
+/* When tables next to code is off, the proc that splitAtProcPoints makes for
+ * the call continuation after the stack check (a call to stg_gc_noregs) is
+ * labelled with the label of its entry block. The x86 native code generator
+ * used to print that label twice, and with -g the label that ends the proc
+ * twice as well. GNU as rejects the second ("symbol `.LcN_proc_end' is
+ * already defined") and so does clang for the first.
+ */
+bar (bits64 x)
+{
+  STK_CHK_GEN_N (16);
+  return (x);
+}

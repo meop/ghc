@@ -156,3 +156,9 @@ test('T27979', [req_cmm, check_errmsg('stg_ap_0_fast')], compile, ['-O -ddump-cm
 test('T27694', normal, compile, ['-dasm-lint'])
 test('T27694c', normal, compile, ['-O -dasm-lint'])
 test('T27694d', normal, compile, ['-O2 -dasm-lint'])
+
+# The x86 NCG printed the label of a split-off proc twice without tables next
+# to code; with -g, GNU as rejects the duplicate end label. Cmm needs the NCG.
+test('NcgDupProcLabel',
+     [cmm_src, only_ways(['normal']), when(not have_ncg(), skip)],
+     compile, ['-no-hs-main -g'])
