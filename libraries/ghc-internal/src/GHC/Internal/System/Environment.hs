@@ -140,23 +140,17 @@ basename f = go f f
 --    does not exist.
 
 getEnv :: String -> IO String
-getEnv name = lookupEnv name >>= maybe handleError return
-  where
-#if defined(mingw32_HOST_OS)
-    handleError = do
-        err <- c_GetLastError
-        if err == eRROR_ENVVAR_NOT_FOUND
-            then ioe_missingEnvVar name
-            else throwGetLastError "getEnv"
+getEnv name = lookupEnv name >>= maybe (ioe_missingEnvVar name) return
 
+#if defined(mingw32_HOST_OS)
 eRROR_ENVVAR_NOT_FOUND :: DWORD
 eRROR_ENVVAR_NOT_FOUND = 203
 
 foreign import ccall unsafe "windows.h GetLastError"
   c_GetLastError:: IO DWORD
 
-#else
-    handleError = ioe_missingEnvVar name
+foreign import ccall unsafe "windows.h SetLastError"
+  c_SetLastError :: DWORD -> IO ()
 #endif
 
 -- | Return the value of the environment variable @var@, or @Nothing@ if
@@ -170,9 +164,16 @@ lookupEnv :: String -> IO (Maybe String)
 lookupEnv name = withCWString name $ \s -> try_size s 256
   where
     try_size s size = allocaArray (fromIntegral size) $ \p_value -> do
+      -- A result of 0 means either that the variable is not set (the last
+      -- error is then ERROR_ENVVAR_NOT_FOUND) or that it is set to the empty
+      -- string. The API does not reset the last error on success, so clear it
+      -- first, and read it straight after the call.
+      c_SetLastError 0
       res <- c_GetEnvironmentVariable s p_value size
       case res of
-        0 -> return Nothing
+        0 -> do
+          err <- c_GetLastError
+          return $ if err == 0 then Just "" else Nothing
         _ | res > size -> try_size s res -- Rare: size increased between calls to GetEnvironmentVariable
           | otherwise  -> peekCWString p_value >>= return . Just
 
