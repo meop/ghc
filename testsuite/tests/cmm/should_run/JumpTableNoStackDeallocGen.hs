@@ -2,7 +2,7 @@
 --
 -- The test is a reproducer of #25733 where stack spill slots where wrongly
 -- deallocated for switch table jumps. This only happened when the initial
--- stack (RESERVED_C_STACK_BYTES, 2048 * SIZEOF_LONG, 16k on most 64bit
+-- stack (RESERVED_C_STACK_BYTES, 2048 * SIZEOF_VOID_P, 16k on 64bit
 -- architectures) was full. I.e. we were breaking the assumptions explained in
 -- Note [extra spill slots].
 --

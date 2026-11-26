@@ -109,9 +109,13 @@
 /* -----------------------------------------------------------------------------
    How much C stack to reserve for local temporaries when in the STG
    world.  Used in StgCRun.c.
+
+   This is 2048 words, i.e. 16k on a 64-bit target.  It has to be counted in
+   words (pointers), not in longs: long is only 32 bits wide on 64-bit
+   Windows (LLP64), which would give just 8k there.
    -------------------------------------------------------------------------- */
 
-#define RESERVED_C_STACK_BYTES (2048 * SIZEOF_LONG)
+#define RESERVED_C_STACK_BYTES (2048 * SIZEOF_VOID_P)
 
 /* -----------------------------------------------------------------------------
    How large is the stack frame saved by StgRun?
