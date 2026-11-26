@@ -88,10 +88,16 @@ else
 RUNTEST_OPTS += -e "config.compiler_debugged=False"
 endif
 
+# GhcWithNativeCodeGen comes from "Have native code generator" in `ghc --info`
+# (see ghc-config.hs). The driver reads it as both ghc_with_native_codegen
+# (which adds the optasm way) and config.have_ncg (the have_ncg() predicate);
+# Hadrian sets both, so the make driver must too.
 ifeq "$(GhcWithNativeCodeGen)" "YES"
 RUNTEST_OPTS += -e ghc_with_native_codegen=True
+RUNTEST_OPTS += -e config.have_ncg=True
 else
 RUNTEST_OPTS += -e ghc_with_native_codegen=False
+RUNTEST_OPTS += -e config.have_ncg=False
 endif
 
 ifeq "$(GhcLeadingUnderscore)" "YES"
