@@ -71,3 +71,11 @@ test('T28101',
      ],
      multi_compile_and_run,
      ['T28101', [('T28101_cmm.cmm', '')], ''])
+
+# The stack check at the entry of a Cmm function must not leave a reference
+# to an undefined label (#28188). GNU as accepts the label, so this only
+# fails when linking.
+test('T28188',
+     [ req_cmm ],
+     multi_compile_and_run,
+     ['T28188', [('T28188_cmm.cmm', '')], ''])

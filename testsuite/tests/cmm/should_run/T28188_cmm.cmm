@@ -1,0 +1,11 @@
+/* The stack check at the entry of a function written in Cmm: the call
+ * continuation used to be shortcut to the entry block, which has no info
+ * table when tables next to code is off, so the code stored the address of a
+ * label (.LcN_info) that nothing defines. GNU as takes that and leaves an
+ * undefined symbol, so only linking fails.
+ */
+bar ()
+{
+  STK_CHK_GEN_N (16);
+  return (0);
+}
