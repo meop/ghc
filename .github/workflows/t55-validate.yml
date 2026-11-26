@@ -1,0 +1,189 @@
+# TEST ONLY: CI for the fork, not for upstream.
+#
+# Validates the T55 fixes (lookupEnv on Windows, stopping the external interpreter before cleaning temporary files)
+# on Linux, inside GHC's own CI image, with the same .gitlab/ci.sh steps as the GitLab job
+# x86_64-linux-deb12-validate (+ its -test job): the full testsuite at Hadrian's default test speed. Build and test are
+# separate jobs, as on GitLab, so each gets its own 6 hour limit. Based on T46's t46-validate.yml, x86_64 only.
+name: t55-validate
+
+on:
+  push:
+    branches: [t55-linux]
+  workflow_dispatch:
+
+env:
+  # From .gitlab-ci.yml (DOCKER_REV, HERMETIC, XZ_OPT) and .gitlab/jobs.yaml (the job variables).
+  DOCKER_REV: 5df428b97c501f61f57587048d4bd15eba53e364
+  HERMETIC: "YES"
+  XZ_OPT: "-1"
+  BIGNUM_BACKEND: gmp
+  BUILD_FLAVOUR: validate
+  INSTALL_CONFIGURE_ARGS: "--enable-strict-ghc-toolchain-check"
+
+jobs:
+  build:
+    name: build ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x86_64-linux-deb12-validate
+            runner: ubuntu-24.04
+            image: x86_64-linux-deb12
+            configure_args: "--enable-strict-ghc-toolchain-check"
+    env:
+      CI_JOB_NAME: ${{ matrix.name }}
+      TEST_ENV: ${{ matrix.name }}
+      BIN_DIST_NAME: ghc-${{ matrix.name }}
+      CONFIGURE_ARGS: ${{ matrix.configure_args }}
+      IMAGE: registry.gitlab.haskell.org/ghc/ci-images/${{ matrix.image }}
+    steps:
+      - name: Free disk space
+        run: |
+          df -h / /mnt
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/powershell /usr/local/share/chromium /usr/share/swift /usr/local/.ghcup \
+            /usr/local/julia* /usr/lib/jvm /opt/az /usr/share/miniconda || true
+          df -h / /mnt
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Submodules (shallow, as GitLab does)
+        run: |
+          for i in 1 2 3; do
+            git submodule update --init --depth 1 --jobs 4 && exit 0
+            sleep 30
+          done
+          exit 1
+      - name: Build in the CI image
+        run: |
+          docker pull "$IMAGE:$DOCKER_REV"
+          docker run --rm -i --user ghc -v "$PWD":/home/ghc/ghc -w /home/ghc/ghc \
+            -e HERMETIC -e XZ_OPT -e BIGNUM_BACKEND -e BUILD_FLAVOUR -e INSTALL_CONFIGURE_ARGS \
+            -e CI_JOB_NAME -e TEST_ENV -e BIN_DIST_NAME -e CONFIGURE_ARGS \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            "$IMAGE:$DOCKER_REV" bash -s <<'EOS'
+          set -eo pipefail
+          sudo chown ghc:ghc -R .
+          trap 'sudo chown -R "$HOST_UID:$HOST_GID" /home/ghc/ghc' EXIT
+          mkdir -p logs tmp-home
+          for step in setup configure build_hadrian test_hadrian_stage1; do
+            .gitlab/ci.sh $step 2>&1 | tee -a "logs/build-$step.log"
+          done
+          EOS
+      - name: Disk after build
+        if: always()
+        run: df -h / /mnt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bindist-${{ matrix.name }}
+          path: ghc-${{ matrix.name }}.tar.xz
+          retention-days: 2
+          compression-level: 0
+          if-no-files-found: warn
+      # The test job's haddock perf tests read these (GitLab passes them as a job artifact).
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: haddock-timing-${{ matrix.name }}
+          path: _build/stage1/haddock-timing-files
+          retention-days: 2
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-logs-${{ matrix.name }}
+          path: |
+            logs
+            ci_timings.txt
+          if-no-files-found: warn
+
+  test:
+    name: test ${{ matrix.name }}
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x86_64-linux-deb12-validate
+            runner: ubuntu-24.04
+            image: x86_64-linux-deb12
+            configure_args: "--enable-strict-ghc-toolchain-check"
+            hadrian_args: "--summary=summary.txt"
+    env:
+      CI_JOB_NAME: ${{ matrix.name }}-test
+      TEST_ENV: ${{ matrix.name }}
+      BIN_DIST_NAME: ghc-${{ matrix.name }}
+      CONFIGURE_ARGS: ${{ matrix.configure_args }}
+      HADRIAN_ARGS: ${{ matrix.hadrian_args }}
+      IMAGE: registry.gitlab.haskell.org/ghc/ci-images/${{ matrix.image }}
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache \
+            /usr/local/share/powershell /usr/local/share/chromium /usr/share/swift /usr/local/.ghcup \
+            /usr/local/julia* /usr/lib/jvm /opt/az /usr/share/miniconda || true
+          df -h / /mnt
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Submodules (shallow, as GitLab does)
+        run: |
+          for i in 1 2 3; do
+            git submodule update --init --depth 1 --jobs 4 && exit 0
+            sleep 30
+          done
+          exit 1
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindist-${{ matrix.name }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: haddock-timing-${{ matrix.name }}
+          path: _build/stage1/haddock-timing-files
+      - name: Test in the CI image
+        run: |
+          ls -l "$BIN_DIST_NAME.tar.xz"
+          docker pull "$IMAGE:$DOCKER_REV"
+          docker run --rm -i --user ghc -v "$PWD":/home/ghc/ghc -w /home/ghc/ghc \
+            -e HERMETIC -e XZ_OPT -e BIGNUM_BACKEND -e BUILD_FLAVOUR -e INSTALL_CONFIGURE_ARGS \
+            -e CI_JOB_NAME -e TEST_ENV -e BIN_DIST_NAME -e CONFIGURE_ARGS -e HADRIAN_ARGS \
+            -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+            "$IMAGE:$DOCKER_REV" bash -s <<'EOS'
+          set -eo pipefail
+          sudo chown ghc:ghc -R .
+          trap 'sudo chown -R "$HOST_UID:$HOST_GID" /home/ghc/ghc' EXIT
+          mkdir -p logs tmp-home unexpected-test-output
+          for step in setup configure; do
+            .gitlab/ci.sh $step 2>&1 | tee -a "logs/test-$step.log"
+          done
+          set +e
+          .gitlab/ci.sh test_hadrian 2>&1 | tee logs/test.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "test_hadrian exit code: $rc" | tee logs/test.rc
+          .gitlab/ci.sh save_test_output || true
+          exit $rc
+          EOS
+      - name: Disk after test
+        if: always()
+        run: df -h / /mnt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-${{ matrix.name }}
+          path: |
+            junit.xml
+            summary.txt
+            logs
+            ci_timings.txt
+            unexpected-test-output.tar.gz
+          if-no-files-found: warn
