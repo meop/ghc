@@ -824,3 +824,13 @@ T26018:
 T28009:
 	"$(TEST_HC)" $(TEST_HC_OPTS) -outputdir j1 T28009.hs 2>&1 | true
 	"$(TEST_HC)" $(TEST_HC_OPTS) -outputdir j2 -j2 T28009.hs 2>&1 | true
+
+# The external interpreter must have exited before the temporary files are
+# cleaned: on Windows a running executable cannot be deleted, so its image
+# (ghc<pid>_tmp_<n>/ghc_tmp_<m>.iserv) and its directory used to be left behind.
+# (The test's directory is new on every run, so tmp does not exist yet.)
+.PHONY: ExtInterpCleanup
+ExtInterpCleanup:
+	mkdir tmp
+	"$(TEST_HC)" -tmpdir "$(PWD)/tmp" $(TEST_HC_OPTS) -fexternal-interpreter -fforce-recomp -v0 -c ExtInterpCleanup.hs
+	if [ -n "$$(ls -A tmp)" ]; then echo "left in the temporary directory:"; ls -AR tmp; fi
