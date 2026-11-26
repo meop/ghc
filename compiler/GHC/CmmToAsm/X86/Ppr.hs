@@ -116,12 +116,19 @@ pprNatCmmDecl config proc@(CmmProc top_info entry_lbl _ (ListGraph blocks)) =
       -- 1. Without tables-next-to-code, we just print it here
       -- 2. With tables-next-to-code, the proc_lbl is the info-table label and it
       -- will be printed in pprBasicBlock after the info-table itself.
+      -- 3. Without tables-next-to-code, a proc split off at a proc point (a call
+      -- continuation) is labelled with the label of its entry block, and
+      -- pprBasicBlock prints that same label for the first block: don't print
+      -- it twice (clang's assembler rejects a redefined label).
     , case top_info_table of
-        Nothing -> pprLabel platform proc_lbl
+        Nothing | (BasicBlock first_id _ : _) <- blocks
+                , blockLbl first_id == proc_lbl
+                -> empty
+                | otherwise -> pprLabel platform proc_lbl
         Just _  -> empty
 
       -- Proc's basic blocks
-    , vcat (map (pprBasicBlock config top_info) blocks)
+    , vcat (map (pprBasicBlock config top_info proc_lbl) blocks)
       -- Note that even the first block gets a label, because with branch-chain
       -- elimination, it might be the target of a goto.
 
@@ -162,8 +169,8 @@ pprSizeDecl platform lbl
    then line (text "\t.size" <+> pprAsmLabel platform lbl <> text ", .-" <> pprAsmLabel platform lbl)
    else empty
 
-pprBasicBlock :: IsDoc doc => NCGConfig -> LabelMap RawCmmStatics -> NatBasicBlock Instr -> doc
-pprBasicBlock config info_env (BasicBlock blockid instrs)
+pprBasicBlock :: IsDoc doc => NCGConfig -> LabelMap RawCmmStatics -> CLabel -> NatBasicBlock Instr -> doc
+pprBasicBlock config info_env proc_lbl (BasicBlock blockid instrs)
   = maybe_infotable $
     pprLabel platform block_label $$
     vcat (map (pprInstr platform) instrs) $$
@@ -171,7 +178,9 @@ pprBasicBlock config info_env (BasicBlock blockid instrs)
       -- Emit both end labels since this may end up being a standalone
       -- top-level block
       line (pprBlockEndLabel platform block_label) $$
-      line (pprProcEndLabel platform block_label)
+      -- Without tables-next-to-code the first block of a proc can have the proc's own
+      -- label, whose end label pprNatCmmDecl prints after the last block.
+      ppWhen (block_label /= proc_lbl) (line (pprProcEndLabel platform block_label))
     )
   where
     block_label = blockLbl blockid
