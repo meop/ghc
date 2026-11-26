@@ -642,6 +642,10 @@ spawnIServ conf = do
   pure inst
 
 -- | Stop the interpreter
+--
+-- An 'ExtIServ' interpreter is also waited for (for a bounded time), so that
+-- when this returns the temporary file it runs from can be deleted: Windows
+-- cannot delete the image of a running process.
 stopInterp :: Interp -> IO ()
 stopInterp interp = case interpInstance interp of
 #if defined(HAVE_INTERNAL_INTERPRETER)
@@ -652,11 +656,28 @@ stopInterp interp = case interpInstance interp of
         case state of
           InterpPending    -> pure state -- already stopped
           InterpRunning i  -> do
-            ex <- getProcessExitCode (interpHandle (instProcess i))
+            let hdl = interpHandle (instProcess i)
+            ex <- getProcessExitCode hdl
             if isJust ex
                then pure ()
-               else sendMessage i Shutdown
+               else do
+                 sendMessage i Shutdown
+                 case ext of
+                   ExtIServ _ -> waitForExit hdl
+                   _          -> pure ()
             pure InterpPending
+
+-- | Wait for a process to exit, for at most 5 seconds: a process that is stuck
+-- must not hang GHC.
+waitForExit :: ProcessHandle -> IO ()
+waitForExit hdl = go (5000 :: Int)
+  where
+    go 0 = pure ()
+    go n = do
+      ex <- getProcessExitCode hdl
+      when (isNothing ex) $ do
+        threadDelay 1000 -- 1 ms
+        go (n - 1)
 
 -- -----------------------------------------------------------------------------
 {- Note [External GHCi pointers]

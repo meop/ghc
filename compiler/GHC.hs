@@ -602,10 +602,13 @@ withCleanupSession ghc = ghc `MC.finally` cleanup
       let logger = hsc_logger hsc_env
       let tmpfs  = hsc_tmpfs hsc_env
       liftIO $ do
-          unless (gopt Opt_KeepTmpFiles dflags) $ do
-            cleanTempFiles logger tmpfs
-            cleanTempDirs logger tmpfs
-          traverse_ stopInterp (hsc_interp hsc_env)
+          -- Stop the interpreter first, and wait for it to exit: an external
+          -- interpreter that GHC linked itself runs from one of the temporary
+          -- files, and Windows cannot delete the image of a running process.
+          traverse_ stopInterp (hsc_interp hsc_env) `MC.finally` do
+            unless (gopt Opt_KeepTmpFiles dflags) $ do
+              cleanTempFiles logger tmpfs
+              cleanTempDirs logger tmpfs
           --  exceptions will be blocked while we clean the temporary files,
           -- so there shouldn't be any difficulty if we receive further
           -- signals.

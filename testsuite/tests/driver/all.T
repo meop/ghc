@@ -339,3 +339,4 @@ test('T24120', normal, compile, ['-Wunused-packages -hide-all-packages -package 
 test('T26551', [extra_files(['T26551.hs'])], makefile_test, [])
 test('T26435', [only_ways(['llvm'])], warn_and_run, ['-finfo-table-map'])
 test('T28009', normal, makefile_test, [])
+test('ExtInterpCleanup', [req_th, js_skip, unless(config.have_ext_interp, skip)], makefile_test, [])
